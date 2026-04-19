@@ -1,0 +1,30 @@
+{
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "prepare:vendors": "node scripts/prepare_frontend_assets.mjs",
+    "sync:dist": "node scripts/sync_dist_assets.mjs",
+    "build": "npm run prepare:vendors && observable build && npm run sync:dist",
+    "dev": "npm run prepare:vendors && observable preview",
+    "observable": "observable"
+  },
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "1.30.0",
+    "@finos/perspective": "3.8.0",
+    "@finos/perspective-viewer": "3.8.0",
+    "@finos/perspective-viewer-datagrid": "3.8.0",
+    "@observablehq/framework": "1.13.3",
+    "@observablehq/plot": "^0.6.17",
+    "ag-grid-community": "34.1.2",
+    "plotly.js-dist-min": "^3.5.0",
+    "vega": "^6.2.0",
+    "vega-embed": "^7.1.0",
+    "vega-lite": "^6.4.2"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

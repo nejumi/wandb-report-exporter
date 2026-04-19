@@ -1,0 +1,24 @@
+[project]
+name = "wandb-report-exporter"
+version = "0.1.0"
+description = "Build-time W&B snapshot exporter for a static Observable viewer."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.2.0",
+  "pyarrow>=18.0.0",
+  "pillow>=10.4.0",
+  "python-dotenv>=1.0.1",
+  "wandb>=0.23.0",
+]
+
+[project.optional-dependencies]
+reports = [
+  "wandb-workspaces>=0.1.13",
+]
+marimo = [
+  "marimo",
+]
+
+[tool.uv]
+package = false
