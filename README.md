@@ -1,4 +1,5 @@
 # W&B Report Exporter
+![W&B Report Exporter screenshots](./wandb-report-exporter_screenshots_tiled.png)
 
 This repository currently focuses on exporting a W&B Report into a `marimo HTML-WASM` viewer for local, self-contained exploration.
 
