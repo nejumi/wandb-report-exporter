@@ -47,7 +47,7 @@ PROCESSED_DIR = FINAL_PROCESSED_DIR
 APP_DATA_DIR = FINAL_APP_DATA_DIR
 APP_MEDIA_DIR = FINAL_APP_MEDIA_DIR
 PANEL_TABLES_DIRNAME = "panel_tables"
-HISTORY_CACHE_VERSION = "v1"
+HISTORY_CACHE_VERSION = "v2"
 EXPORT_TIMER_START: float | None = None
 
 VIEWS2_RAW_VIEW_QUERY = """
@@ -78,6 +78,7 @@ query Views2RawView($id: ID!) {
 
 @dataclass
 class ExportConfig:
+    base_url: str | None
     entity: str | None
     project: str | None
     report_url: str | None
@@ -97,10 +98,25 @@ def env_flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def infer_base_url(report_url: str | None, explicit_base_url: str | None = None) -> str | None:
+    if explicit_base_url:
+        return explicit_base_url
+    if not report_url:
+        return None
+    parsed = urlparse(report_url)
+    if not (parsed.scheme and parsed.netloc):
+        return None
+    host = parsed.netloc.lower()
+    if host in {"wandb.ai", "www.wandb.ai"}:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def parse_args() -> ExportConfig:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Export a local snapshot for the W&B fast report viewer.")
     parser.add_argument("report_url_arg", nargs="?", help="Optional positional W&B report URL.")
+    parser.add_argument("--base-url", default=os.getenv("WANDB_BASE_URL"))
     parser.add_argument("--entity", default=os.getenv("WANDB_ENTITY"))
     parser.add_argument("--project", default=os.getenv("WANDB_PROJECT"))
     parser.add_argument("--report-url", default=os.getenv("WANDB_REPORT_URL"))
@@ -121,6 +137,9 @@ def parse_args() -> ExportConfig:
     parser.add_argument("--sample-data", action="store_true", help="Force sample snapshot generation.")
     args = parser.parse_args()
     report_url = args.report_url_arg or args.report_url
+    base_url = infer_base_url(report_url, args.base_url)
+    if base_url:
+        os.environ["WANDB_BASE_URL"] = base_url
     history_keys = [item.strip() for item in args.history_keys.split(",") if item.strip()]
     has_live_target = bool(report_url or (args.entity and args.project))
     sample_data = args.sample_data or not (has_live_target and os.getenv("WANDB_API_KEY"))
@@ -130,6 +149,7 @@ def parse_args() -> ExportConfig:
         or bool(args.table_name or args.table_artifact)
     )
     return ExportConfig(
+        base_url=base_url,
         entity=args.entity,
         project=args.project,
         report_url=report_url,
@@ -469,6 +489,111 @@ def sanitize_json_value(value: Any) -> Any:
     return value
 
 
+def coerce_history_numeric_value(value: Any) -> float | None:
+    sanitized = sanitize_json_value(value)
+    if sanitized is None or isinstance(sanitized, (dict, list)):
+        return None
+    if isinstance(sanitized, bool):
+        return float(int(sanitized))
+    if isinstance(sanitized, (int, float)):
+        number = float(sanitized)
+        return number if math.isfinite(number) else None
+    if isinstance(sanitized, str):
+        try:
+            number = float(sanitized)
+        except ValueError:
+            return None
+        return number if math.isfinite(number) else None
+    return None
+
+
+def weighted_quantile(points: list[tuple[float, float]], quantile: float) -> float | None:
+    if not points:
+        return None
+    total_weight = sum(weight for _, weight in points)
+    if total_weight <= 0:
+        return None
+    threshold = total_weight * quantile
+    cumulative = 0.0
+    for value, weight in points:
+        cumulative += weight
+        if cumulative >= threshold:
+            return value
+    return points[-1][0]
+
+
+def histogram_history_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or str(value.get("_type") or "") != "histogram":
+        return None
+    packed_bins = value.get("packedBins") or {}
+    counts = value.get("values")
+    if not isinstance(packed_bins, dict) or not isinstance(counts, list) or not counts:
+        return None
+    base = coerce_history_numeric_value(packed_bins.get("min"))
+    size = coerce_history_numeric_value(packed_bins.get("size"))
+    if base is None or size is None or size <= 0:
+        return None
+    weighted_points: list[tuple[float, float]] = []
+    first_nonzero_index: int | None = None
+    last_nonzero_index: int | None = None
+    total_weight = 0.0
+    weighted_sum = 0.0
+    for index, raw_count in enumerate(counts):
+        count = coerce_history_numeric_value(raw_count)
+        if count is None or count <= 0:
+            continue
+        if first_nonzero_index is None:
+            first_nonzero_index = index
+        last_nonzero_index = index
+        center = base + (index + 0.5) * size
+        weighted_points.append((center, count))
+        total_weight += count
+        weighted_sum += center * count
+    if not weighted_points or total_weight <= 0:
+        return None
+    mean = weighted_sum / total_weight
+    variance = sum(weight * ((point - mean) ** 2) for point, weight in weighted_points) / total_weight
+    min_value = base + first_nonzero_index * size if first_nonzero_index is not None else None
+    max_value = base + (last_nonzero_index + 1) * size if last_nonzero_index is not None else None
+    return {
+        "metric_value_kind": "histogram",
+        "metric_histogram_count": total_weight,
+        "metric_histogram_mean": mean,
+        "metric_histogram_std": math.sqrt(max(variance, 0.0)),
+        "metric_histogram_min": min_value,
+        "metric_histogram_max": max_value,
+        "metric_histogram_q10": weighted_quantile(weighted_points, 0.10),
+        "metric_histogram_q25": weighted_quantile(weighted_points, 0.25),
+        "metric_histogram_q50": weighted_quantile(weighted_points, 0.50),
+        "metric_histogram_q75": weighted_quantile(weighted_points, 0.75),
+        "metric_histogram_q90": weighted_quantile(weighted_points, 0.90),
+    }
+
+
+def normalize_history_metric_value(value: Any) -> dict[str, Any]:
+    sanitized = sanitize_json_value(value)
+    numeric_value = coerce_history_numeric_value(sanitized)
+    if numeric_value is not None:
+        return {
+            "metric_value": numeric_value,
+            "metric_value_kind": "scalar",
+            "metric_value_json": None,
+        }
+    histogram = histogram_history_summary(sanitized)
+    if histogram:
+        return {
+            "metric_value": None,
+            "metric_value_kind": "histogram",
+            "metric_value_json": safe_json(sanitized),
+            **histogram,
+        }
+    return {
+        "metric_value": None,
+        "metric_value_kind": "json" if isinstance(sanitized, (dict, list)) else "text",
+        "metric_value_json": safe_json(sanitized),
+    }
+
+
 def parse_report_url(report_url: str | None) -> tuple[str | None, str | None, str | None]:
     if not report_url:
         return None, None, None
@@ -570,6 +695,16 @@ def is_table_descriptor(value: Any) -> bool:
     )
 
 
+def contains_table_descriptor(value: Any) -> bool:
+    if is_table_descriptor(value):
+        return True
+    if isinstance(value, dict):
+        members = value.get("members")
+        if isinstance(members, list):
+            return any(contains_table_descriptor(member) for member in members)
+    return False
+
+
 def table_name_score(name: str) -> tuple[int, int]:
     lowered = name.lower()
     score = 0
@@ -602,7 +737,7 @@ def extract_table_candidates_from_report(report_spec: dict[str, Any]) -> list[st
     candidates: list[str] = []
     for node in iter_nodes(report_spec):
         for key, value in node.items():
-            if isinstance(key, str) and "table" in key.lower() and is_table_descriptor(value):
+            if isinstance(key, str) and "table" in key.lower() and contains_table_descriptor(value):
                 candidates.append(key)
     return sorted(dedupe_strings(candidates), key=table_name_score, reverse=True)
 
@@ -927,6 +1062,25 @@ def extract_table_key_from_expression(node: Any) -> str | None:
     return None
 
 
+def extract_table_key_from_panel_state(node: Any) -> str | None:
+    if isinstance(node, dict):
+        key_type = str(node.get("keyType") or node.get("type") or "")
+        if key_type == "table-file" and node.get("key"):
+            return str(node.get("key"))
+        working_key_and_type = node.get("workingKeyAndType")
+        if isinstance(working_key_and_type, dict):
+            if str(working_key_and_type.get("type") or "") == "table-file" and working_key_and_type.get("key"):
+                return str(working_key_and_type.get("key"))
+        for value in node.values():
+            if table_key := extract_table_key_from_panel_state(value):
+                return table_key
+    elif isinstance(node, list):
+        for item in node:
+            if table_key := extract_table_key_from_panel_state(item):
+                return table_key
+    return None
+
+
 def extract_pick_column_name(node: Any) -> str | None:
     if not isinstance(node, dict):
         return None
@@ -1085,6 +1239,11 @@ def normalize_panel_grid_panels(panels: list[dict[str, Any]]) -> list[dict[str, 
             panel2_config = config.get("panel2Config", {})
             table_key = extract_table_key_from_expression(panel2_config.get("exp"))
             child_config = panel2_config.get("panelConfig", {}).get("childConfig", {})
+            state_table_key = extract_table_key_from_panel_state(panel2_config.get("panelConfig"))
+            if state_table_key is None:
+                state_table_key = extract_table_key_from_panel_state(config.get("defaultWorkspaceState", {}))
+            if state_table_key:
+                table_key = state_table_key
             payload["simple_filter"] = parse_simple_weave_filter(
                 child_config.get("tableState", {}).get("preFilterFunction")
             )
@@ -1438,6 +1597,7 @@ def flatten_history(run: Any, metric_requests: dict[str, list[str]], extra_scan_
                 source_key = next((alias for alias in aliases if alias in item), None)
                 if source_key is None:
                     continue
+                metric_payload = normalize_history_metric_value(item.get(source_key))
                 row = {
                     "run_id": getattr(run, "id", ""),
                     "run_name": getattr(run, "name", ""),
@@ -1445,12 +1605,12 @@ def flatten_history(run: Any, metric_requests: dict[str, list[str]], extra_scan_
                     "epoch": sanitize_json_value(epoch),
                     "runtime": sanitize_json_value(runtime),
                     "metric_name": requested_key,
-                    "metric_value": sanitize_json_value(item.get(source_key)),
                     "timestamp": datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
                     if isinstance(timestamp, (int, float))
                     else str(timestamp or ""),
                     "timestamp_value": sanitize_json_value(timestamp),
                     "source_metric_name": source_key,
+                    **metric_payload,
                 }
                 for extra_key in extra_scan_keys or []:
                     if extra_key in {requested_key, source_key, "_step", "epoch", "_runtime", "_timestamp"}:
@@ -1475,6 +1635,7 @@ def flatten_history(run: Any, metric_requests: dict[str, list[str]], extra_scan_
                     source_key = next((alias for alias in aliases if alias in record), None)
                     if source_key is None:
                         continue
+                    metric_payload = normalize_history_metric_value(record.get(source_key))
                     rows.append(
                         {
                             "run_id": getattr(run, "id", ""),
@@ -1483,12 +1644,12 @@ def flatten_history(run: Any, metric_requests: dict[str, list[str]], extra_scan_
                             "epoch": sanitize_json_value(record.get("epoch")),
                             "runtime": sanitize_json_value(runtime),
                             "metric_name": requested_key,
-                            "metric_value": sanitize_json_value(record.get(source_key)),
                             "timestamp": datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
                             if isinstance(timestamp, (int, float))
                             else str(timestamp or ""),
                             "timestamp_value": sanitize_json_value(timestamp),
                             "source_metric_name": source_key,
+                            **metric_payload,
                         }
                     )
     return rows
@@ -1525,6 +1686,18 @@ def cached_flatten_history(run: Any, metric_requests: dict[str, list[str]], extr
                     "runtime",
                     "metric_name",
                     "metric_value",
+                    "metric_value_kind",
+                    "metric_value_json",
+                    "metric_histogram_count",
+                    "metric_histogram_mean",
+                    "metric_histogram_std",
+                    "metric_histogram_min",
+                    "metric_histogram_max",
+                    "metric_histogram_q10",
+                    "metric_histogram_q25",
+                    "metric_histogram_q50",
+                    "metric_histogram_q75",
+                    "metric_histogram_q90",
                     "timestamp",
                     "timestamp_value",
                     "source_metric_name",
@@ -2455,7 +2628,30 @@ def persist_snapshot(
     write_parquet_with_columns(
         PROCESSED_DIR / "history_eval_metrics.parquet",
         history_rows,
-        ["run_id", "step", "epoch", "metric_name", "metric_value", "timestamp"],
+        [
+            "run_id",
+            "run_name",
+            "step",
+            "epoch",
+            "runtime",
+            "metric_name",
+            "metric_value",
+            "metric_value_kind",
+            "metric_value_json",
+            "metric_histogram_count",
+            "metric_histogram_mean",
+            "metric_histogram_std",
+            "metric_histogram_min",
+            "metric_histogram_max",
+            "metric_histogram_q10",
+            "metric_histogram_q25",
+            "metric_histogram_q50",
+            "metric_histogram_q75",
+            "metric_histogram_q90",
+            "timestamp",
+            "timestamp_value",
+            "source_metric_name",
+        ],
     )
     write_parquet_with_columns(
         PROCESSED_DIR / "table_predictions.parquet",

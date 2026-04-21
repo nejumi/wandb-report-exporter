@@ -52,6 +52,7 @@ Copy `.env.example` to `.env` if you want environment-based configuration.
 Important variables:
 
 - `WANDB_API_KEY`: required for live export from W&B
+- `WANDB_BASE_URL`: optional W&B host override for Dedicated / Self-Managed Cloud. If omitted, the exporter infers it from the report URL host for non-public deployments. You normally do not need to set this for `wandb.ai`.
 - `WANDB_REPORT_URL`: the W&B report URL to export
 - `WANDB_ENTITY`, `WANDB_PROJECT`: optional when the report URL already contains them
 - `WANDB_HISTORY_KEYS`: optional extra history keys to force-export
@@ -61,6 +62,12 @@ Important variables:
 - `WANDB_ENABLE_PRIMARY_TABLE_SCAN=1`: opt into the slower legacy primary-table crawl used by the old Observable fallback
 
 In most cases, the simplest workflow is to pass the report URL directly on the command line.
+
+If you are exporting from a non-public W&B deployment, make sure your login and API key match that host. For example:
+
+```bash
+WANDB_BASE_URL="https://wandb.my-company.example" wandb login --relogin
+```
 
 ## Quick Start
 
@@ -84,6 +91,8 @@ make marimo-serve
 ```
 
 Open `http://localhost:8124`.
+
+The exported site now shows an explicit loading overlay while marimo hydrates the page, and heavier history/custom-chart panels load lazily after the main report shell becomes visible.
 
 ## Common Workflows
 
@@ -127,25 +136,52 @@ The repository's `.gitignore` is set up so that the following stay local by defa
 
 In normal use, you should commit source files, tests, and docs, but not downloaded W&B content or generated export output.
 
-## Current Coverage
+## Support Matrix
 
-The exporter and marimo viewer currently support a substantial subset of W&B report content, including:
+This matrix is based on W&B’s public docs plus the current SDK/source surface, and then mapped onto what this exporter actually does today.
 
-- rich HTML and markdown-like report blocks
-- code blocks
-- image blocks
-- panel grids
-- Run History Line Plot panels
-- Combined Plot / Weave scatter-style panels
-- many table panels, including computed columns and sort metadata when exported
-- image tables with segmentation mask overlays
-- supported Plotly payloads exported through media panels
-- artifact lineage panels
-- Vega-based custom charts where the exported spec and offline data are sufficient
-- square/polar Vega charts rendered with series-aware offline field mapping
-- per-panel series selection for multi-series scatter/radar-style charts in marimo
-- hover tooltips for custom scatter/history/radar-style points
-- runset-aware panel filtering, including inferred visible runs from exported panel/media rows when the published report spec only contains hidden/selected state
+Primary references:
+
+- W&B report editing docs: <https://docs.wandb.ai/models/reports/edit-a-report>
+- W&B data type overview: <https://docs.wandb.ai/models/ref/python/data-types>
+- W&B custom charts docs: <https://docs.wandb.ai/models/app/features/custom-charts>
+- W&B tables docs: <https://docs.wandb.ai/models/tables/visualize-tables>
+- W&B lineage docs: <https://docs.wandb.ai/models/registry/lineage>
+- W&B SDK source:
+  - `Image`: <https://github.com/wandb/wandb/blob/main/wandb/sdk/data_types/image.py>
+  - `Object3D`: <https://github.com/wandb/wandb/blob/main/wandb/sdk/data_types/object_3d.py>
+  - `Molecule`: <https://github.com/wandb/wandb/blob/main/wandb/sdk/data_types/molecule.py>
+  - `Plotly`: <https://github.com/wandb/wandb/blob/main/wandb/sdk/data_types/plotly.py>
+
+Status legend:
+
+- `Supported`: works in normal marimo export flow today
+- `Partial`: exported and rendered in some form, but with meaningful gaps versus W&B
+- `Unsupported`: not reconstructed offline yet; marimo should show a per-panel note instead of crashing
+
+| W&B surface | W&B capability | Exporter status | Current behavior / gaps |
+| --- | --- | --- | --- |
+| Report markdown blocks | W&B reports support Markdown blocks and rich report text | Supported | Exported as report blocks and rendered in marimo. |
+| Report code blocks | W&B reports support syntax-highlighted code blocks | Supported | Exported and rendered as offline code blocks. |
+| Report image blocks | W&B reports support image blocks in the body of a report | Supported | Static images are copied locally and rendered offline. |
+| Report HTML elements / embedded rich links | W&B reports support HTML elements and embedded rich-media links | Partial | Basic report HTML is preserved, but arbitrary third-party embeds are not guaranteed to remain interactive offline. |
+| Panel grids | Reports organize panels inside panel grids with layout metadata | Supported | Grid order and block structure are preserved in the marimo export. |
+| Runset / report-scoped filtering | Reports can scope panels to runsets and saved report views | Partial | Saved report-visible runs are respected when they are present in exported state. Browser-only or unsaved UI state can still be missing from the public spec. |
+| Run History Line Plot | W&B supports history panels over scalar metrics and histogram-like parameter/gradient metrics | Partial | Scalar history is supported. Histogram-valued history is exported and rendered offline as a step-by-value heatmap with hover tooltips and a per-step cross-section mini-histogram, which is much closer to W&B’s histogram view, but still not a byte-for-byte recreation of the W&B runtime. |
+| Weave table panels / Combined Table | W&B tables support sort, filter, grouping, merged views, side-by-side views, and saved table views | Partial | Export preserves rows, computed columns, sort metadata, and simple numeric prefilters. Full W&B table runtime features such as merged/side-by-side compare UIs are not reproduced. |
+| Weave plot panels / Combined Plot | W&B can render table-backed scatter/projection style plots | Partial | Offline scatter-style plot panels are supported, including per-run grouping and tooltips. More advanced W&B runtime projections or interactions may not match exactly. |
+| Vega custom charts (`Vega2`) | W&B custom charts use Vega/Vega-Lite with table/query-backed data | Partial | Exported Vega specs are rendered offline when enough spec and data are present. W&B-specific runtime hooks are not fully reproduced. |
+| Plotly media | W&B supports Plotly as a first-class data type | Partial | Plotly payloads are exported. The marimo renderer currently implements a subset, with sunburst supported and other Plotly chart types falling back to a note. |
+| Table cells with plain media | W&B tables can contain mixed media types such as image/audio/video/html | Partial | Plain image cells render offline. Non-image media types are not yet reconstructed generically in marimo tables. |
+| `wandb.Image` | W&B `Image` supports captions, masks, boxes, and segmentation metadata | Partial | Base images are exported and rendered. Captions are preserved. |
+| `wandb.Image` masks / `ImageMask` | W&B UI supports mask overlays, opacity changes, and interactive viewing | Partial | Mask files and metadata are exported, but the marimo viewer does not yet reproduce W&B’s interactive overlay controls. |
+| `wandb.Image` 2D bounding boxes | W&B UI supports labeled/filterable 2D boxes on images | Partial | Box metadata is preserved in export payloads, but box overlays are not rendered in marimo yet. |
+| Artifact lineage | W&B exposes lineage graphs for run inputs/outputs and artifact relationships | Supported | Lineage metadata is exported and rendered as an offline lineage panel. |
+| `wandb.Object3D` / point clouds / `box3d()` | W&B supports 3D point clouds, meshes, and 3D boxes | Unsupported | Not reconstructed in marimo yet. These panels should degrade to an offline note instead of breaking the page. |
+| `wandb.Molecule` | W&B supports interactive 3D molecule views from supported file types / RDKit | Unsupported | Not reconstructed in marimo yet. These panels should degrade to an offline note instead of breaking the page. |
+| `wandb.Html` and arbitrary W&B-specific runtime panels | W&B supports HTML payloads and some UI/runtime-specific panels | Unsupported / Partial | If the exporter cannot reconstruct a panel generically, the marimo viewer should show a per-panel note rather than crashing the whole report. |
+
+In short: this project aims for graceful degradation. If a panel cannot yet be reconstructed offline, that should surface as a local placeholder for that panel, not as a broken export or a blank page.
 
 ## Notes and Limitations
 

@@ -14,6 +14,7 @@ import zlib
 from pathlib import Path
 
 import pandas as pd
+from PIL import Image, ImageDraw, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -412,17 +413,48 @@ def write_svg_asset(svg_text: str, prefix: str) -> str:
     return f"assets/generated_assets/{filename}"
 
 
+def write_png_asset(image: Image.Image, prefix: str) -> str:
+    GENERATED_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    buffer = image.tobytes()
+    digest = hashlib.sha256(buffer).hexdigest()[:16]
+    filename = f"{prefix}-{digest}.png"
+    path = GENERATED_ASSETS_DIR / filename
+    image.save(path, format="PNG")
+    return f"assets/generated_assets/{filename}"
+
+
+def write_json_asset(payload: object, prefix: str) -> str:
+    GENERATED_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    filename = f"{prefix}-{digest}.json"
+    path = GENERATED_ASSETS_DIR / filename
+    path.write_text(text, encoding="utf-8")
+    return f"assets/generated_assets/{filename}"
+
+
 def clamp(value: float, lower: float, upper: float) -> float:
     return min(max(value, lower), upper)
 
 
-def tooltip_box_geometry(x: float, y: float, lines: list[str], width: float, height: float) -> tuple[float, float, float, float]:
+def tooltip_box_geometry(
+    x: float,
+    y: float,
+    lines: list[str],
+    width: float,
+    height: float,
+    *,
+    detail_width: float = 0.0,
+    detail_height: float = 0.0,
+) -> tuple[float, float, float, float]:
     char_width = 7.2
     line_height = 16
     padding_x = 10
     padding_y = 9
-    box_width = max(92.0, max((len(line) for line in lines), default=0) * char_width + padding_x * 2)
-    box_height = max(36.0, len(lines) * line_height + padding_y * 2 - 2)
+    text_width = max((len(line) for line in lines), default=0) * char_width + padding_x * 2
+    text_height = max(36.0, len(lines) * line_height + padding_y * 2 - 2)
+    box_width = max(92.0, text_width, detail_width + padding_x * 2)
+    box_height = max(36.0, text_height + detail_height)
     prefer_left = x > width * 0.6
     base_left = x - box_width - 16 if prefer_left else x + 16
     base_top = y + 16 if y - box_height - 14 < 8 else y - box_height - 14
@@ -459,6 +491,56 @@ def svg_interactive_point(
         + "<g class='chart-tooltip'>"
         + f"<rect x='{left:.2f}' y='{top:.2f}' width='{box_width:.2f}' height='{box_height:.2f}' rx='12' ry='12' class='chart-tooltip__bubble'></rect>"
         + f"<text x='{left + 10:.2f}' y='{top + 20:.2f}' class='chart-tooltip__text'>{tspans}</text>"
+        + "</g></g>"
+    )
+
+
+def svg_interactive_rect(
+    *,
+    x: float,
+    y: float,
+    rect_width: float,
+    rect_height: float,
+    fill: str,
+    opacity: float,
+    lines: list[str],
+    width: float,
+    height: float,
+    detail_svg: str = "",
+    detail_width: float = 0.0,
+    detail_height: float = 0.0,
+) -> str:
+    left, top, box_width, box_height = tooltip_box_geometry(
+        x + rect_width / 2,
+        y + rect_height / 2,
+        lines,
+        width,
+        height,
+        detail_width=detail_width,
+        detail_height=detail_height,
+    )
+    line_height = 16
+    padding_y = 9
+    text_height = max(36.0, len(lines) * line_height + padding_y * 2 - 2)
+    tspans = "".join(
+        f"<tspan x='{left + 10:.2f}' dy='{0 if index == 0 else 16}'>{html.escape(line)}</tspan>"
+        for index, line in enumerate(lines)
+    )
+    hide_all = 'const root=this.ownerSVGElement||this.closest("svg");if(root){for(const other of root.querySelectorAll(".chart-tooltip")){other.style.opacity="0";other.style.visibility="hidden";}}'
+    detail_group = (
+        f"<g transform='translate({left + 10:.2f},{top + text_height:.2f})'>{detail_svg}</g>"
+        if detail_svg
+        else ""
+    )
+    return (
+        "<g class='chart-point' tabindex='0' "
+        + f"""onfocusin='this.parentNode.appendChild(this);{hide_all};const tip=this.querySelector(".chart-tooltip");if(tip){{tip.style.visibility="visible";tip.style.opacity="1";}}' """
+        + """onfocusout='const tip=this.querySelector(".chart-tooltip");if(tip){tip.style.opacity="0";tip.style.visibility="hidden";}'>"""
+        + f"""<rect x='{x:.2f}' y='{y:.2f}' width='{rect_width:.2f}' height='{rect_height:.2f}' fill='{html.escape(fill)}' fill-opacity='{opacity:.3f}' stroke='none' pointer-events='all' onmouseover='this.parentNode.parentNode.appendChild(this.parentNode);{hide_all};const tip=this.parentNode.querySelector(".chart-tooltip");if(tip){{tip.style.visibility="visible";tip.style.opacity="1";}}' onmousemove='{hide_all};const tip=this.parentNode.querySelector(".chart-tooltip");if(tip){{tip.style.visibility="visible";tip.style.opacity="1";}}' onmouseout='const tip=this.parentNode.querySelector(".chart-tooltip");if(tip){{tip.style.opacity="0";tip.style.visibility="hidden";}}' onmouseleave='const tip=this.parentNode.querySelector(".chart-tooltip");if(tip){{tip.style.opacity="0";tip.style.visibility="hidden";}}'></rect>"""
+        + "<g class='chart-tooltip'>"
+        + f"<rect x='{left:.2f}' y='{top:.2f}' width='{box_width:.2f}' height='{box_height:.2f}' rx='12' ry='12' class='chart-tooltip__bubble'></rect>"
+        + f"<text x='{left + 10:.2f}' y='{top + 20:.2f}' class='chart-tooltip__text'>{tspans}</text>"
+        + detail_group
         + "</g></g>"
     )
 
@@ -580,6 +662,370 @@ def history_tooltip_clear_attrs() -> str:
     return """onmouseleave='for (const tip of this.querySelectorAll(".chart-tooltip")) { tip.style.opacity = "0"; tip.style.visibility = "hidden"; }' onblur='for (const tip of this.querySelectorAll(".chart-tooltip")) { tip.style.opacity = "0"; tip.style.visibility = "hidden"; }' """
 
 
+def format_plot_value(value: float) -> str:
+    return f"{float(value):.4f}".rstrip("0").rstrip(".")
+
+
+def weighted_quantile(points: list[tuple[float, float]], quantile: float) -> float | None:
+    if not points:
+        return None
+    total_weight = sum(weight for _, weight in points)
+    if total_weight <= 0:
+        return None
+    threshold = total_weight * quantile
+    cumulative = 0.0
+    for value, weight in points:
+        cumulative += weight
+        if cumulative >= threshold:
+            return value
+    return points[-1][0]
+
+
+def histogram_payload_from_row(row: dict[str, object]) -> dict[str, object] | None:
+    payload = row.get("metric_value_json")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            payload = None
+    if isinstance(payload, dict) and str(payload.get("_type") or "") == "histogram":
+        return payload
+    return None
+
+
+def histogram_cells_from_payload(payload: object) -> list[dict[str, float]]:
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            return []
+    if not isinstance(payload, dict) or str(payload.get("_type") or "") != "histogram":
+        return []
+    packed_bins = payload.get("packedBins") or {}
+    counts = payload.get("values")
+    if not isinstance(packed_bins, dict) or not isinstance(counts, list) or not counts:
+        return []
+    base = to_plot_number(packed_bins.get("min"), False)
+    size = to_plot_number(packed_bins.get("size"), False)
+    if base is None or size is None or size <= 0:
+        return []
+    cells: list[dict[str, float]] = []
+    for index, raw_count in enumerate(counts):
+        count = to_plot_number(raw_count, False)
+        if count is None or count <= 0:
+            continue
+        low = base + index * size
+        high = low + size
+        cells.append(
+            {
+                "low": low,
+                "high": high,
+                "center": low + size / 2,
+                "count": count,
+            }
+        )
+    return cells
+
+
+def hex_to_rgb(color: str) -> tuple[int, int, int]:
+    value = str(color or "#0f766e").lstrip("#")
+    if len(value) != 6:
+        return (15, 118, 110)
+    return tuple(int(value[index : index + 2], 16) for index in (0, 2, 4))
+
+
+def histogram_summary_from_payload(payload: object) -> dict[str, float] | None:
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            return None
+    if not isinstance(payload, dict) or str(payload.get("_type") or "") != "histogram":
+        return None
+    packed_bins = payload.get("packedBins") or {}
+    counts = payload.get("values")
+    if not isinstance(packed_bins, dict) or not isinstance(counts, list) or not counts:
+        return None
+    base = to_plot_number(packed_bins.get("min"), False)
+    size = to_plot_number(packed_bins.get("size"), False)
+    if base is None or size is None or size <= 0:
+        return None
+    weighted_points: list[tuple[float, float]] = []
+    first_nonzero: int | None = None
+    last_nonzero: int | None = None
+    total = 0.0
+    weighted_sum = 0.0
+    for index, raw_count in enumerate(counts):
+        count = to_plot_number(raw_count, False)
+        if count is None or count <= 0:
+            continue
+        if first_nonzero is None:
+            first_nonzero = index
+        last_nonzero = index
+        center = base + (index + 0.5) * size
+        weighted_points.append((center, count))
+        total += count
+        weighted_sum += center * count
+    if not weighted_points or total <= 0:
+        return None
+    mean = weighted_sum / total
+    variance = sum(weight * ((value - mean) ** 2) for value, weight in weighted_points) / total
+    summary = {
+        "count": total,
+        "mean": mean,
+        "std": math.sqrt(max(variance, 0.0)),
+        "min": base + first_nonzero * size if first_nonzero is not None else mean,
+        "max": base + (last_nonzero + 1) * size if last_nonzero is not None else mean,
+        "q10": weighted_quantile(weighted_points, 0.10) or mean,
+        "q25": weighted_quantile(weighted_points, 0.25) or mean,
+        "q50": weighted_quantile(weighted_points, 0.50) or mean,
+        "q75": weighted_quantile(weighted_points, 0.75) or mean,
+        "q90": weighted_quantile(weighted_points, 0.90) or mean,
+    }
+    return summary
+
+
+def histogram_summary_from_row(row: dict[str, object]) -> dict[str, float] | None:
+    if str(row.get("metric_value_kind") or "") == "histogram":
+        keys = {
+            "count": "metric_histogram_count",
+            "mean": "metric_histogram_mean",
+            "std": "metric_histogram_std",
+            "min": "metric_histogram_min",
+            "max": "metric_histogram_max",
+            "q10": "metric_histogram_q10",
+            "q25": "metric_histogram_q25",
+            "q50": "metric_histogram_q50",
+            "q75": "metric_histogram_q75",
+            "q90": "metric_histogram_q90",
+        }
+        summary = {
+            key: to_plot_number(row.get(source_key), False)
+            for key, source_key in keys.items()
+        }
+        if summary["q50"] is not None:
+            return {key: float(value) for key, value in summary.items() if value is not None}
+        payload = row.get("metric_value_json")
+        fallback = histogram_summary_from_payload(payload)
+        if fallback:
+            return fallback
+    payload = row.get("metric_value_json")
+    return histogram_summary_from_payload(payload)
+
+
+def histogram_cross_section_detail_svg(
+    cells: list[dict[str, float]],
+    *,
+    highlight_low: float,
+    highlight_high: float,
+) -> tuple[str, float, float]:
+    ordered = sorted(cells, key=lambda cell: (float(cell["low"]), float(cell["high"])))
+    if not ordered:
+        return "", 0.0, 0.0
+    width = 176.0
+    height = 78.0
+    left = 6.0
+    right = 6.0
+    top = 4.0
+    bottom = 16.0
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    min_low = min(float(cell["low"]) for cell in ordered)
+    max_high = max(float(cell["high"]) for cell in ordered)
+    max_count = max(float(cell["count"]) for cell in ordered)
+    if max_high <= min_low or max_count <= 0:
+        return "", 0.0, 0.0
+
+    def scale_x(value: float) -> float:
+        return left + (value - min_low) / (max_high - min_low) * plot_width
+
+    def scale_y(value: float) -> float:
+        return top + plot_height - value / max_count * plot_height
+
+    area_points = [f"M {scale_x(min_low):.2f} {top + plot_height:.2f}"]
+    for cell in ordered:
+        x0 = scale_x(float(cell["low"]))
+        x1 = scale_x(float(cell["high"]))
+        y = scale_y(float(cell["count"]))
+        area_points.append(f"L {x0:.2f} {y:.2f}")
+        area_points.append(f"L {x1:.2f} {y:.2f}")
+    area_points.append(f"L {scale_x(max_high):.2f} {top + plot_height:.2f} Z")
+    highlight_x = scale_x(highlight_low)
+    highlight_width = max(2.0, scale_x(highlight_high) - highlight_x)
+    axis_y = top + plot_height
+    labels = (
+        f"<text x='{left:.2f}' y='{height - 3:.2f}' class='chart-tooltip__text' style='font-size:10px;fill:rgba(255,255,255,0.72)'>{html.escape(format_plot_value(min_low))}</text>"
+        + f"<text x='{left + plot_width:.2f}' y='{height - 3:.2f}' text-anchor='end' class='chart-tooltip__text' style='font-size:10px;fill:rgba(255,255,255,0.72)'>{html.escape(format_plot_value(max_high))}</text>"
+    )
+    svg = (
+        f"<rect x='{left:.2f}' y='{top:.2f}' width='{plot_width:.2f}' height='{plot_height:.2f}' fill='rgba(255,255,255,0.02)' stroke='rgba(255,255,255,0.08)' stroke-width='1' rx='8' ry='8'></rect>"
+        + f"<rect x='{highlight_x:.2f}' y='{top:.2f}' width='{highlight_width:.2f}' height='{plot_height:.2f}' fill='rgba(255,255,255,0.16)' rx='4' ry='4'></rect>"
+        + f"<path d='{' '.join(area_points)}' fill='rgba(96,165,250,0.35)' stroke='rgba(147,197,253,0.95)' stroke-width='1.5' stroke-linejoin='round'></path>"
+        + f"<line x1='{left:.2f}' y1='{axis_y:.2f}' x2='{left + plot_width:.2f}' y2='{axis_y:.2f}' stroke='rgba(255,255,255,0.18)' stroke-width='1'></line>"
+        + labels
+    )
+    return svg, width, height
+
+
+def render_history_histogram_inline(panel: dict[str, object], history_rows: list[dict[str, object]]) -> str | None:
+    metric_names = [str(metric) for metric in panel.get("metrics", []) if metric]
+    if not metric_names:
+        return None
+    axis_field = history_axis_field(panel)
+    metric_name_set = {alias for metric in metric_names for alias in history_metric_aliases(metric)}
+    filtered = [row for row in history_rows if str(row.get("metric_name")) in metric_name_set]
+    if not filtered:
+        return None
+
+    heatmap_points: list[dict[str, object]] = []
+    for row in filtered:
+        x = to_plot_number(row.get(axis_field), axis_field == "timestamp_value")
+        if x is None:
+            continue
+        cells = histogram_cells_from_payload(histogram_payload_from_row(row))
+        if not cells:
+            continue
+        heatmap_points.append({"x": x, "cells": cells})
+
+    if len(heatmap_points) < 2:
+        return None
+
+    width = 940
+    height = 420
+    left, right, top, bottom = 72, 18, 16, 48
+    strip_height = height - top - bottom
+    min_x = min(float(point["x"]) for point in heatmap_points)
+    max_x = max(float(point["x"]) for point in heatmap_points)
+    all_cells = [cell for point in heatmap_points for cell in point["cells"]]
+    min_y = min(float(cell["low"]) for cell in all_cells)
+    max_y = max(float(cell["high"]) for cell in all_cells)
+    aggregated_cells: dict[tuple[float, float, float], float] = {}
+    for point in heatmap_points:
+        x_value = round(float(point["x"]), 9)
+        for cell in point["cells"]:
+            key = (x_value, round(float(cell["low"]), 9), round(float(cell["high"]), 9))
+            aggregated_cells[key] = aggregated_cells.get(key, 0.0) + float(cell["count"])
+    max_count = max(aggregated_cells.values()) if aggregated_cells else 0.0
+
+    def scale_x(value: float) -> float:
+        if max_x == min_x:
+            return float(left)
+        return left + (value - min_x) / (max_x - min_x) * (width - left - right)
+
+    def scale_y(value: float) -> float:
+        if max_y == min_y:
+            return top + strip_height
+        return top + strip_height - (value - min_y) / (max_y - min_y) * strip_height
+
+    image = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    axis_color = (96, 96, 96, 255)
+    grid_color = (0, 0, 0, 14)
+    border_color = (0, 0, 0, 56)
+    base_cell_color = (235, 239, 244, 255)
+    accent_color = (78, 152, 223)
+
+    if axis_field == "timestamp_value":
+        axis_formatter = format_date_value
+    elif axis_field == "runtime":
+        axis_formatter = format_runtime_value
+    else:
+        axis_formatter = format_plot_value
+
+    strip_top = top
+    strip_bottom = top + strip_height
+    draw.line((left, strip_top, left, strip_bottom), fill=border_color, width=1)
+    draw.line((left, strip_bottom, width - right, strip_bottom), fill=border_color, width=1)
+
+    for tick_index in range(5):
+        t = tick_index / 4
+        x = left + t * (width - left - right)
+        y = strip_bottom - t * strip_height
+        draw.line((x, strip_top, x, strip_bottom), fill=grid_color, width=1)
+        draw.line((left, y, width - right, y), fill=grid_color, width=1)
+        y_tick = min_y + (max_y - min_y) * t
+        draw.text((left - 56, y - 6), format_plot_value(y_tick), fill=axis_color, font=font)
+        x_tick = min_x + (max_x - min_x) * t
+        draw.text((x - 12, strip_bottom + 10), axis_formatter(x_tick), fill=axis_color, font=font)
+
+    draw.text((width - 46, strip_bottom - 20), "Step", fill=axis_color, font=font)
+
+    unique_x = sorted({round(float(point["x"]), 9) for point in heatmap_points})
+    step_width = max(4.0, (width - left - right) / max(len(unique_x), 1))
+    for (x_value, low, high), count in aggregated_cells.items():
+        x = scale_x(x_value)
+        cell_left = x - step_width / 2
+        y_top = scale_y(high)
+        y_bottom = scale_y(low)
+        rect = (
+            int(round(cell_left)),
+            int(round(y_top)),
+            int(round(cell_left + step_width)),
+            int(round(max(y_top + 1, y_bottom))),
+        )
+        draw.rectangle(rect, fill=base_cell_color)
+        normalized = 0.0 if max_count <= 0 else math.sqrt(count / max_count)
+        fill = (
+            int(base_cell_color[0] + (accent_color[0] - base_cell_color[0]) * normalized),
+            int(base_cell_color[1] + (accent_color[1] - base_cell_color[1]) * normalized),
+            int(base_cell_color[2] + (accent_color[2] - base_cell_color[2]) * normalized),
+            255,
+        )
+        draw.rectangle(rect, fill=fill)
+
+    flattened = Image.new("RGB", image.size, (255, 255, 255))
+    flattened.paste(image, mask=image.getchannel("A"))
+    png_path = write_png_asset(flattened, "history")
+    png_filename = Path(png_path).name
+    tooltip_style = (
+        ".chart-point{cursor:crosshair}"
+        ".chart-point__dot{pointer-events:none}"
+        ".chart-tooltip{visibility:hidden;opacity:0;pointer-events:none;transition:opacity 120ms ease}"
+        ".chart-tooltip__bubble{fill:rgba(17,24,39,0.94);stroke:rgba(255,255,255,0.16);stroke-width:1}"
+        ".chart-tooltip__text{fill:#fff;font-size:12px;font-family:sans-serif}"
+    )
+    overlay = [
+        f"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' class='marimo-chart-svg' role='img' {history_tooltip_clear_attrs()}>",
+        f"<style>{tooltip_style}</style>",
+        f"<image href='{html.escape(png_filename)}' x='0' y='0' width='{width}' height='{height}' />",
+    ]
+    step_cells: dict[float, list[dict[str, float]]] = {}
+    for (x_value, low, high), count in aggregated_cells.items():
+        step_cells.setdefault(x_value, []).append({"low": low, "high": high, "count": count})
+    for (x_value, low, high), count in aggregated_cells.items():
+        x = scale_x(x_value)
+        y_top = scale_y(high)
+        y_bottom = scale_y(low)
+        detail_svg, detail_width, detail_height = histogram_cross_section_detail_svg(
+            step_cells.get(x_value, []),
+            highlight_low=low,
+            highlight_high=high,
+        )
+        overlay.append(
+            svg_interactive_rect(
+                x=x - step_width / 2,
+                y=y_top,
+                rect_width=step_width,
+                rect_height=max(1.0, y_bottom - y_top),
+                fill="#ffffff",
+                opacity=0.001,
+                lines=[
+                    axis_formatter(x_value),
+                    f"bin: {format_plot_value(low)} - {format_plot_value(high)}",
+                    f"count: {format_plot_value(count)}",
+                ],
+                width=width,
+                height=height,
+                detail_svg=detail_svg,
+                detail_width=detail_width,
+                detail_height=detail_height,
+            )
+        )
+    overlay.append("</svg>")
+    return "".join(overlay)
+
+
 def render_history_svg(panel: dict[str, object], history_rows: list[dict[str, object]]) -> str | None:
     metric_names = [str(metric) for metric in panel.get("metrics", []) if metric]
     if not metric_names:
@@ -590,35 +1036,155 @@ def render_history_svg(panel: dict[str, object], history_rows: list[dict[str, ob
     if not filtered:
         return None
 
-    series_map: dict[str, list[dict[str, float]]] = {}
+    scalar_series_map: dict[str, list[dict[str, float]]] = {}
+    histogram_series_map: dict[str, list[dict[str, object]]] = {}
     for row in filtered:
         x = to_plot_number(row.get(axis_field), axis_field == "timestamp_value")
-        y = to_plot_number(row.get("metric_value"), False)
-        if x is None or y is None:
+        if x is None:
             continue
         label = (
             f"{row.get('run_name') or row.get('run_id')} · {row.get('metric_name')}"
             if len(metric_names) > 1
             else str(row.get("run_name") or row.get("run_id") or row.get("metric_name"))
         )
-        series_map.setdefault(label, []).append({"x": x, "y": y})
-
-    series = [
-        {"label": label, "points": sorted(points, key=lambda point: point["x"])}
-        for label, points in series_map.items()
-        if len(points) > 1
-    ]
-    if not series:
-        return None
+        histogram_payload = histogram_payload_from_row(row)
+        histogram_cells = histogram_cells_from_payload(histogram_payload)
+        if histogram_cells:
+            histogram_series_map.setdefault(label, []).append({"x": x, "cells": histogram_cells})
+            continue
+        y = to_plot_number(row.get("metric_value"), False)
+        if y is None:
+            continue
+        scalar_series_map.setdefault(label, []).append({"x": x, "y": y})
 
     width, height = 940, 420
     left, right, top, bottom = 74, 24, 20, 58
-    all_points = [point for entry in series for point in entry["points"]]
+    palette = ["#0f766e", "#2563eb", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#65a30d", "#db2777"]
+
+    if axis_field == "timestamp_value":
+        axis_formatter = format_date_value
+    elif axis_field == "runtime":
+        axis_formatter = format_runtime_value
+    else:
+        axis_formatter = format_plot_value
+
+    axis_text_style = "fill:#606060;font-size:12px;font-family:sans-serif"
+    tooltip_style = (
+        ".chart-point{cursor:crosshair}"
+        ".chart-point__dot{pointer-events:none}"
+        ".chart-tooltip{visibility:hidden;opacity:0;pointer-events:none;transition:opacity 120ms ease}"
+        ".chart-tooltip__bubble{fill:rgba(17,24,39,0.94);stroke:rgba(255,255,255,0.16);stroke-width:1}"
+        ".chart-tooltip__text{fill:#fff;font-size:12px;font-family:sans-serif}"
+    )
+
+    scalar_series = [
+        {"label": label, "points": sorted(points, key=lambda point: point["x"])}
+        for label, points in scalar_series_map.items()
+        if len(points) > 1
+    ]
+    histogram_series = [
+        {"label": label, "points": sorted(points, key=lambda point: float(point["x"]))}
+        for label, points in histogram_series_map.items()
+        if len(points) > 1
+    ]
+    if not scalar_series and not histogram_series:
+        return None
+
+    if histogram_series and not scalar_series:
+        all_hist_points = [point for entry in histogram_series for point in entry["points"]]
+        all_cells = [cell for entry in histogram_series for point in entry["points"] for cell in point["cells"]]
+        if not all_cells:
+            return None
+        run_gap = 30
+        strip_height = 180
+        title_pad = 28
+        width = 940
+        height = max(220, len(histogram_series) * (strip_height + run_gap) + 56)
+        left, right, top, bottom = 88, 24, 18, 42
+        min_x = min(float(point["x"]) for point in all_hist_points)
+        max_x = max(float(point["x"]) for point in all_hist_points)
+        min_y = min(float(cell["low"]) for cell in all_cells)
+        max_y = max(float(cell["high"]) for cell in all_cells)
+        max_count = max(float(cell["count"]) for cell in all_cells)
+
+        def scale_x(value: float) -> float:
+            if max_x == min_x:
+                return float(left)
+            return left + (value - min_x) / (max_x - min_x) * (width - left - right)
+
+        def scale_y(value: float, strip_top: float) -> float:
+            if max_y == min_y:
+                return strip_top + strip_height
+            return strip_top + strip_height - (value - min_y) / (max_y - min_y) * strip_height
+
+        def cell_color(series_index: int, count: float) -> tuple[str, float]:
+            base = palette[series_index % len(palette)]
+            normalized = 0.15 if max_count <= 0 else 0.15 + 0.85 * math.sqrt(count / max_count)
+            return base, normalized
+
+        svg = [
+            f"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' role='img' {history_tooltip_clear_attrs()}>",
+            f"<style>{tooltip_style}</style>",
+        ]
+
+        for series_index, entry in enumerate(histogram_series):
+            strip_top = top + series_index * (strip_height + run_gap) + title_pad
+            strip_bottom = strip_top + strip_height
+            svg.append(f"<text x='{left}' y='{strip_top - 10}' text-anchor='start' style='{axis_text_style};font-weight:600'>{html.escape(str(entry['label']))}</text>")
+            svg.append(f"<line x1='{left}' y1='{strip_bottom}' x2='{width-right}' y2='{strip_bottom}' stroke='rgba(0,0,0,0.22)' stroke-width='1.2' />")
+            svg.append(f"<line x1='{left}' y1='{strip_top}' x2='{left}' y2='{strip_bottom}' stroke='rgba(0,0,0,0.22)' stroke-width='1.2' />")
+
+            for tick_index in range(5):
+                t = tick_index / 4
+                x = left + t * (width - left - right)
+                y = strip_bottom - t * strip_height
+                svg.append(f"<line x1='{x}' y1='{strip_top}' x2='{x}' y2='{strip_bottom}' stroke='rgba(0,0,0,0.05)' />")
+                svg.append(f"<line x1='{left}' y1='{y}' x2='{width-right}' y2='{y}' stroke='rgba(0,0,0,0.05)' />")
+                if series_index == len(histogram_series) - 1:
+                    x_tick = min_x + (max_x - min_x) * t
+                    svg.append(f"<text x='{x}' y='{strip_bottom + 22}' text-anchor='middle' style='{axis_text_style}'>{html.escape(axis_formatter(x_tick))}</text>")
+                y_tick = min_y + (max_y - min_y) * t
+                svg.append(f"<text x='{left - 10}' y='{y + 4}' text-anchor='end' style='{axis_text_style}'>{html.escape(format_plot_value(y_tick))}</text>")
+
+            points = entry["points"]
+            if len(points) > 1:
+                step_width = max(4.0, (width - left - right) / len(points))
+            else:
+                step_width = width - left - right
+            for point in points:
+                x = scale_x(float(point["x"]))
+                cell_left = x - step_width / 2
+                for cell in point["cells"]:
+                    y_top = scale_y(float(cell["high"]), strip_top)
+                    y_bottom = scale_y(float(cell["low"]), strip_top)
+                    rect_height = max(1.0, y_bottom - y_top)
+                    color, opacity = cell_color(series_index, float(cell["count"]))
+                    svg.append(
+                        svg_interactive_rect(
+                            x=cell_left,
+                            y=y_top,
+                            rect_width=step_width,
+                            rect_height=rect_height,
+                            fill=color,
+                            opacity=opacity,
+                            lines=[
+                                str(entry["label"]),
+                                f"{axis_field}: {axis_formatter(float(point['x']))}",
+                                f"bin: {format_plot_value(float(cell['low']))} - {format_plot_value(float(cell['high']))}",
+                                f"count: {format_plot_value(float(cell['count']))}",
+                            ],
+                            width=width,
+                            height=height,
+                        )
+                    )
+        svg.append("</svg>")
+        return "".join(svg)
+
+    all_points = [point for entry in scalar_series for point in entry["points"]]
     min_x = min(point["x"] for point in all_points)
     max_x = max(point["x"] for point in all_points)
     min_y = min(point["y"] for point in all_points)
     max_y = max(point["y"] for point in all_points)
-    palette = ["#0f766e", "#2563eb", "#dc2626", "#9333ea", "#ea580c", "#0891b2", "#65a30d", "#db2777"]
 
     def scale_x(value: float) -> float:
         if max_x == min_x:
@@ -630,21 +1196,6 @@ def render_history_svg(panel: dict[str, object], history_rows: list[dict[str, ob
             return float(height - bottom)
         return height - bottom - (value - min_y) / (max_y - min_y) * (height - top - bottom)
 
-    if axis_field == "timestamp_value":
-        axis_formatter = format_date_value
-    elif axis_field == "runtime":
-        axis_formatter = format_runtime_value
-    else:
-        axis_formatter = lambda value: f"{float(value):.2f}".rstrip("0").rstrip(".")
-
-    axis_text_style = "fill:#606060;font-size:12px;font-family:sans-serif"
-    tooltip_style = (
-        ".chart-point{cursor:crosshair}"
-        ".chart-point__dot{pointer-events:none}"
-        ".chart-tooltip{visibility:hidden;opacity:0;pointer-events:none;transition:opacity 120ms ease}"
-        ".chart-tooltip__bubble{fill:rgba(17,24,39,0.94);stroke:rgba(255,255,255,0.16);stroke-width:1}"
-        ".chart-tooltip__text{fill:#fff;font-size:12px;font-family:sans-serif}"
-    )
     svg = [
         f"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width} {height}' role='img' {history_tooltip_clear_attrs()}>",
         f"<style>{tooltip_style}</style>",
@@ -660,7 +1211,7 @@ def render_history_svg(panel: dict[str, object], history_rows: list[dict[str, ob
         y_tick = min_y + (max_y - min_y) * (index / 4)
         svg.append(f"<text x='{x}' y='{height-bottom+24}' text-anchor='middle' style='{axis_text_style}'>{html.escape(axis_formatter(x_tick))}</text>")
         svg.append(f"<text x='{left-12}' y='{y+4}' text-anchor='end' style='{axis_text_style}'>{html.escape(f'{y_tick:.2f}'.rstrip('0').rstrip('.'))}</text>")
-    for index, entry in enumerate(series):
+    for index, entry in enumerate(scalar_series):
         color = palette[index % len(palette)]
         path = " ".join(
             f"{'M' if point_index == 0 else 'L'} {scale_x(point['x'])} {scale_y(point['y'])}"
@@ -680,13 +1231,13 @@ def render_history_svg(panel: dict[str, object], history_rows: list[dict[str, ob
                     width=width,
                     height=height,
                     stroke_width=1,
-                    lines=[
-                        str(entry["label"]),
-                        f"{axis_field}: {axis_formatter(point['x'])}",
-                        f"value: {format(point['y'], '.4f').rstrip('0').rstrip('.')}",
-                    ],
+                        lines=[
+                            str(entry["label"]),
+                            f"{axis_field}: {axis_formatter(point['x'])}",
+                            f"value: {format_plot_value(point['y'])}",
+                        ],
+                    )
                 )
-            )
     svg.append("</svg>")
     return "".join(svg)
 
@@ -711,9 +1262,15 @@ def attach_pre_rendered_history(node: object, history_rows: list[dict[str, objec
                         visible_values=visible_values,
                         use_selection_fallback=use_selection_fallback,
                     )
-                    svg = render_history_svg(hydrated, filtered_history_rows)
-                    if svg:
-                        hydrated["history_svg_path"] = write_svg_asset(svg, "history")
+                    history_inline_svg = render_history_histogram_inline(hydrated, filtered_history_rows)
+                    if history_inline_svg:
+                        hydrated["history_asset_path"] = write_svg_asset(history_inline_svg, "history")
+                        hydrated["history_asset_type"] = "image/svg+xml"
+                    else:
+                        svg = render_history_svg(hydrated, filtered_history_rows)
+                        if svg:
+                            hydrated["history_asset_path"] = write_svg_asset(svg, "history")
+                            hydrated["history_asset_type"] = "image/svg+xml"
                 hydrated_panels.append(hydrated)
             node = {**node, "panels": hydrated_panels}
         return {key: attach_pre_rendered_history(value, history_rows, report) for key, value in node.items()}
@@ -1627,10 +2184,27 @@ def notebook_source(encoded_payload: str) -> str:
                 return str(axis)
 
             def render_history_line_plot(panel):
-                if panel.get("history_svg_path"):
+                inline_svg = panel.get("history_inline_svg")
+                if inline_svg:
                     return render_html(
                         "<div class='marimo-chart-shell'>"
-                        + f"<object data='{{html.escape(str(panel.get('history_svg_path')))}}' type='image/svg+xml' class='marimo-chart-object'></object>"
+                        + str(inline_svg)
+                        + "</div>"
+                    )
+                asset_path = panel.get("history_asset_path")
+                asset_type = str(panel.get("history_asset_type") or "")
+                if asset_path:
+                    if asset_type == "image/svg+xml":
+                        return render_html(
+                            "<div class='marimo-chart-shell marimo-loading-shell'>"
+                            + "<div class='marimo-loading-badge'>Loading chart…</div>"
+                            + f'''<iframe src='{{html.escape(str(asset_path))}}' loading='lazy' class='marimo-chart-frame' title='History chart' onload="this.closest('.marimo-loading-shell')?.classList.add('is-loaded')"></iframe>'''
+                            + "</div>"
+                        )
+                    return render_html(
+                        "<div class='marimo-chart-shell marimo-loading-shell'>"
+                        + "<div class='marimo-loading-badge'>Loading panel…</div>"
+                        + f'''<object data='{{html.escape(str(asset_path))}}' type='{{html.escape(asset_type or 'image/svg+xml')}}' class='marimo-chart-object' onload="this.closest('.marimo-loading-shell')?.classList.add('is-loaded')"></object>'''
                         + "</div>"
                     )
                 return render_html("<div class='marimo-note'>No offline history rows were exported for this plot.</div>")
@@ -1898,50 +2472,62 @@ def notebook_source(encoded_payload: str) -> str:
                 return vstack(blocks)
 
             def render_panel(panel, block):
-                if panel.get("view_type") == "Markdown Panel":
-                    return mo.md(panel.get("markdown", ""))
-                title = panel.get("table_key") or panel.get("view_type") or "Panel"
-                if panel.get("table_key") and panel.get("mode") == "plot":
-                    title = f"{{humanize_label(panel.get('table_key')) or 'Panel'}} Plot"
-                elif panel.get("table_key") and panel.get("mode") == "table":
-                    title = f"{{humanize_label(panel.get('table_key')) or 'Panel'}} Table"
-                if panel.get("view_type") == "Media Browser":
-                    heading = mo.md(f"### {{humanize_label(title)}}")
-                    return vstack([heading, render_media_browser(panel, block)])
-                if panel.get("view_type") == "Run History Line Plot":
-                    heading = mo.md(f"### {{humanize_label(summarize_metric_title(panel.get('metrics') or [title]))}}")
-                    return vstack([heading, render_history_line_plot(panel)])
-                runset_names = block.get("runsets") or []
-                rows = filter_rows_by_runset_selection(
-                    panel_tables.get(panel.get("table_key"), []),
-                    runset_names,
-                    visible_values=infer_block_visible_values(block),
-                    use_selection_fallback=should_use_selection_fallback(runset_names),
-                )
-                rows = apply_simple_filter(rows, panel.get("simple_filter"))
-                if panel.get("view_type") == "Vega2":
-                    if is_category_score_matrix(rows):
-                        body = render_category_score_chart(rows, panel)
-                    elif panel.get("vega_svg_path"):
-                        object_class = "marimo-chart-object"
-                        if panel.get("vega_aspect") == "square":
-                            object_class += " marimo-chart-object--square"
-                        body = render_html(
-                            "<div class='marimo-chart-shell'>"
-                            + f"<object data='{{html.escape(str(panel.get('vega_svg_path')))}}' type='image/svg+xml' class='{{object_class}}'></object>"
-                            + "</div>"
-                        )
-                    elif panel.get("vega_error"):
-                        body = render_html("<div class='marimo-note'>" + html.escape(str(panel.get("vega_error"))) + "</div>")
+                try:
+                    if panel.get("view_type") == "Markdown Panel":
+                        return mo.md(panel.get("markdown", ""))
+                    title = panel.get("table_key") or panel.get("view_type") or "Panel"
+                    if panel.get("table_key") and panel.get("mode") == "plot":
+                        title = f"{{humanize_label(panel.get('table_key')) or 'Panel'}} Plot"
+                    elif panel.get("table_key") and panel.get("mode") == "table":
+                        title = f"{{humanize_label(panel.get('table_key')) or 'Panel'}} Table"
+                    if panel.get("view_type") == "Media Browser":
+                        heading = mo.md(f"### {{humanize_label(title)}}")
+                        return vstack([heading, render_media_browser(panel, block)])
+                    if panel.get("view_type") == "Run History Line Plot":
+                        heading = mo.md(f"### {{humanize_label(summarize_metric_title(panel.get('metrics') or [title]))}}")
+                        return vstack([heading, render_history_line_plot(panel)])
+                    runset_names = block.get("runsets") or []
+                    rows = filter_rows_by_runset_selection(
+                        panel_tables.get(panel.get("table_key"), []),
+                        runset_names,
+                        visible_values=infer_block_visible_values(block),
+                        use_selection_fallback=should_use_selection_fallback(runset_names),
+                    )
+                    rows = apply_simple_filter(rows, panel.get("simple_filter"))
+                    if panel.get("view_type") == "Vega2":
+                        if is_category_score_matrix(rows):
+                            body = render_category_score_chart(rows, panel)
+                        elif panel.get("vega_svg_path"):
+                            frame_class = "marimo-chart-frame"
+                            if panel.get("vega_aspect") == "square":
+                                frame_class += " marimo-chart-frame--square"
+                            body = render_html(
+                                "<div class='marimo-chart-shell marimo-loading-shell'>"
+                                + "<div class='marimo-loading-badge'>Loading chart…</div>"
+                                + f'''<iframe src='{{html.escape(str(panel.get('vega_svg_path')))}}' loading='lazy' class='{{frame_class}}' title='Custom chart' onload="this.closest('.marimo-loading-shell')?.classList.add('is-loaded')"></iframe>'''
+                                + "</div>"
+                            )
+                        elif panel.get("vega_error"):
+                            body = render_html("<div class='marimo-note'>" + html.escape(str(panel.get("vega_error"))) + "</div>")
+                        else:
+                            body = render_html("<div class='marimo-note'>Custom chart data could not be rendered generically in marimo.</div>")
+                    elif panel.get("mode") == "plot":
+                        plot = panel.get("plot", {{}})
+                        body = render_scatter(rows, plot, panel)
                     else:
-                        body = render_html("<div class='marimo-note'>Custom chart data could not be rendered generically in marimo.</div>")
-                elif panel.get("mode") == "plot":
-                    plot = panel.get("plot", {{}})
-                    body = render_scatter(rows, plot, panel)
-                else:
-                    body = render_table(rows, panel)
-                heading = mo.md(f"### {{humanize_label(title)}}")
-                return vstack([heading, body])
+                        body = render_table(rows, panel)
+                    heading = mo.md(f"### {{humanize_label(title)}}")
+                    return vstack([heading, body])
+                except Exception as exc:
+                    title = panel.get("table_key") or panel.get("view_type") or "Panel"
+                    heading = mo.md(f"### {{humanize_label(title)}}")
+                    note = render_html(
+                        "<div class='marimo-note'>"
+                        + "This panel could not be rendered offline. "
+                        + html.escape(str(exc))
+                        + "</div>"
+                    )
+                    return vstack([heading, note])
 
             def render_block(block):
                 block_type = block.get("type")
@@ -1997,10 +2583,60 @@ def notebook_source(encoded_payload: str) -> str:
                     padding: 1rem;
                     overflow-x: auto;
                   }}
+                  .marimo-chart-shell {{
+                    content-visibility: auto;
+                    contain-intrinsic-size: 540px;
+                  }}
                   .marimo-chart-svg {{
                     width: 100%;
                     min-width: 0;
                     display: block;
+                  }}
+                  .marimo-chart-frame {{
+                    width: 100%;
+                    min-height: 420px;
+                    border: 0;
+                    display: block;
+                    background: transparent;
+                  }}
+                  .marimo-loading-shell {{
+                    position: relative;
+                    min-height: 420px;
+                  }}
+                  .marimo-loading-badge {{
+                    position: absolute;
+                    inset: 1rem auto auto 1rem;
+                    z-index: 3;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.55rem;
+                    padding: 0.55rem 0.85rem;
+                    border-radius: 999px;
+                    background: rgba(255,255,255,0.94);
+                    border: 1px solid rgba(59,130,246,0.18);
+                    box-shadow: 0 8px 22px rgba(15,23,42,0.08);
+                    color: rgba(15,23,42,0.86);
+                    font-size: 0.92rem;
+                    font-weight: 600;
+                    letter-spacing: 0.01em;
+                    pointer-events: none;
+                    transition: opacity 160ms ease, transform 160ms ease;
+                  }}
+                  .marimo-loading-badge::before {{
+                    content: "";
+                    width: 0.9rem;
+                    height: 0.9rem;
+                    border-radius: 999px;
+                    border: 2px solid rgba(59,130,246,0.24);
+                    border-top-color: rgba(37,99,235,0.9);
+                    animation: marimo-loading-spin 0.9s linear infinite;
+                  }}
+                  .marimo-loading-shell.is-loaded > .marimo-loading-badge {{
+                    opacity: 0;
+                    transform: translateY(-4px);
+                  }}
+                  .marimo-loading-shell.is-loaded > .marimo-loading-badge::before {{
+                    animation: none;
                   }}
                   .marimo-chart-object {{
                     width: 100%;
@@ -2008,10 +2644,45 @@ def notebook_source(encoded_payload: str) -> str:
                     border: 0;
                     display: block;
                   }}
+                  .marimo-heatmap-shell {{
+                    position: relative;
+                    overflow: hidden;
+                  }}
+                  .marimo-heatmap-image {{
+                    user-select: none;
+                    -webkit-user-drag: none;
+                  }}
+                  .marimo-heatmap-tooltip {{
+                    position: absolute;
+                    left: 0;
+                    top: 0;
+                    visibility: hidden;
+                    opacity: 0;
+                    pointer-events: none;
+                    transition: opacity 120ms ease;
+                    max-width: 240px;
+                    padding: 0.6rem 0.72rem;
+                    border-radius: 12px;
+                    background: rgba(17, 24, 39, 0.94);
+                    color: #fff;
+                    font-size: 12px;
+                    line-height: 1.45;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+                    z-index: 20;
+                  }}
                   .marimo-chart-object--square {{
                     aspect-ratio: 1 / 1;
                     min-height: 620px;
                     height: auto;
+                  }}
+                  .marimo-chart-frame--square {{
+                    aspect-ratio: 1 / 1;
+                    min-height: 620px;
+                    height: auto;
+                  }}
+                  @keyframes marimo-loading-spin {{
+                    from {{ transform: rotate(0deg); }}
+                    to {{ transform: rotate(360deg); }}
                   }}
                   .marimo-sunburst-svg {{
                     min-width: 0;

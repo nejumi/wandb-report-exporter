@@ -20,6 +20,10 @@ from scripts.export_wandb_snapshot import (
     runset_should_resolve_selected_runs,
     export_panel_tables,
     table_prediction_meta_rows_from_records,
+    normalize_history_metric_value,
+    extract_table_candidates_from_report,
+    extract_table_key_from_panel_state,
+    infer_base_url,
 )
 
 
@@ -149,6 +153,46 @@ class ExportWandbSnapshotTests(unittest.TestCase):
         self.assertEqual(payload["plot"]["x"], "vehicle IoU")
         self.assertEqual(payload["plot"]["color"], "__run_name")
 
+    def test_extract_table_candidates_from_report_reads_union_table_descriptors(self) -> None:
+        spec = {
+            "type": "typedDict",
+            "propertyTypes": {
+                "validation_prediction_table": {
+                    "type": "union",
+                    "members": [
+                        "none",
+                        {
+                            "type": "file",
+                            "wbObjectType": {"type": "table"},
+                        },
+                    ],
+                }
+            },
+        }
+        self.assertIn("validation_prediction_table", extract_table_candidates_from_report(spec))
+
+    def test_extract_table_key_from_panel_state_reads_working_key_and_type(self) -> None:
+        node = {
+            "panelConfig": {
+                "workingKeyAndType": {
+                    "key": "validation_prediction_table",
+                    "type": "table-file",
+                }
+            }
+        }
+        self.assertEqual(extract_table_key_from_panel_state(node), "validation_prediction_table")
+
+    def test_infer_base_url_skips_public_wandb_host(self) -> None:
+        self.assertIsNone(
+            infer_base_url("https://wandb.ai/entity/project/reports/Name--VmlldzoxMjM0")
+        )
+
+    def test_infer_base_url_uses_dedicated_host(self) -> None:
+        self.assertEqual(
+            infer_base_url("https://wandb.my-company.example/entity/project/reports/Name--VmlldzoxMjM0"),
+            "https://wandb.my-company.example",
+        )
+
     def test_runset_should_resolve_selected_runs_only_when_selected_view_is_active(self) -> None:
         self.assertTrue(runset_should_resolve_selected_runs({"only_show_selected": True}))
         self.assertTrue(runset_should_resolve_selected_runs({"single_run_only": True}))
@@ -273,6 +317,19 @@ class ExportWandbSnapshotTests(unittest.TestCase):
         self.assertEqual(rows[0]["metric_name"], "system/gpu.process.0.powerWatts")
         self.assertEqual(rows[0]["source_metric_name"], "system/gpu.0.powerWatts")
         self.assertEqual(rows[0]["metric_value"], 111.5)
+
+    def test_normalize_history_metric_value_summarizes_histograms(self) -> None:
+        payload = normalize_history_metric_value(
+            {
+                "_type": "histogram",
+                "packedBins": {"count": 4, "min": -1.0, "size": 0.5},
+                "values": [1, 3, 2, 0],
+            }
+        )
+        self.assertEqual(payload["metric_value_kind"], "histogram")
+        self.assertIsNone(payload["metric_value"])
+        self.assertAlmostEqual(payload["metric_histogram_q50"], -0.25)
+        self.assertAlmostEqual(payload["metric_histogram_q90"], 0.25)
 
     def test_enrich_block_visible_runs_attaches_visible_rows_to_matching_block(self) -> None:
         runsets = [

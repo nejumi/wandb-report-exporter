@@ -49,6 +49,143 @@ def patch_marimo_worker_imports() -> None:
             script_path.write_text(replaced, encoding="utf-8")
 
 
+def inject_loading_overlay() -> None:
+    index_path = OUTPUT_DIR / "index.html"
+    if not index_path.exists():
+        return
+    text = index_path.read_text(encoding="utf-8")
+    marker = "codex-marimo-loading"
+    if marker in text:
+        return
+    overlay_style = """
+    <style id="codex-marimo-loading-style">
+      #codex-marimo-loading {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+        background:
+          radial-gradient(circle at top, rgba(219, 234, 254, 0.78), transparent 38%),
+          linear-gradient(180deg, rgba(248,250,252,0.98), rgba(241,245,249,0.98));
+        color: #0f172a;
+        transition: opacity 240ms ease, visibility 240ms ease;
+      }
+      #codex-marimo-loading.is-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .codex-marimo-loading-card {
+        max-width: 34rem;
+        padding: 1.2rem 1.35rem;
+        border-radius: 22px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: rgba(255,255,255,0.92);
+        box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);
+        backdrop-filter: blur(10px);
+      }
+      .codex-marimo-loading-title {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        margin: 0 0 0.55rem;
+        font-size: 1.02rem;
+        font-weight: 700;
+      }
+      .codex-marimo-loading-title::before {
+        content: "";
+        width: 1rem;
+        height: 1rem;
+        border-radius: 999px;
+        border: 2px solid rgba(59,130,246,0.22);
+        border-top-color: rgba(37,99,235,0.95);
+        animation: codex-marimo-loading-spin 0.9s linear infinite;
+      }
+      .codex-marimo-loading-copy {
+        margin: 0;
+        color: rgba(15,23,42,0.72);
+        line-height: 1.55;
+        font-size: 0.95rem;
+      }
+      .codex-marimo-loading-copy strong {
+        color: rgba(15,23,42,0.9);
+      }
+      @keyframes codex-marimo-loading-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+    </style>
+    """
+    overlay_html = """
+    <div id="codex-marimo-loading" aria-live="polite" aria-busy="true">
+      <div class="codex-marimo-loading-card">
+        <p class="codex-marimo-loading-title">Now loading this W&B report…</p>
+        <p class="codex-marimo-loading-copy">The page is preparing the report structure first and then heavier charts load lazily. On large reports this can take a little while, but the content is still on the way.</p>
+      </div>
+    </div>
+    """
+    overlay_script = """
+    <script id="codex-marimo-loading-script">
+      (function () {
+        const root = document.getElementById("root");
+        const overlay = document.getElementById("codex-marimo-loading");
+        if (!root || !overlay) return;
+        let hidden = false;
+        const hide = () => {
+          if (hidden) return;
+          hidden = true;
+          overlay.classList.add("is-hidden");
+          window.setTimeout(() => overlay.remove(), 320);
+        };
+        const hasRenderedContent = () => {
+          if (!root.childElementCount) return false;
+          const content = root.textContent || "";
+          if (content.trim().length > 24) return true;
+          return Boolean(
+            root.querySelector("main, section, article, .markdown, .mo-md, .marimo-chart-shell, .marimo-table-shell, .marimo-note")
+          );
+        };
+        if (hasRenderedContent()) {
+          hide();
+          return;
+        }
+        const observer = new MutationObserver(() => {
+          if (hasRenderedContent()) {
+            observer.disconnect();
+            hide();
+          }
+        });
+        observer.observe(root, { childList: true, subtree: true, characterData: true });
+        window.addEventListener("load", () => {
+          if (hasRenderedContent()) {
+            observer.disconnect();
+            hide();
+            return;
+          }
+          window.setTimeout(() => {
+            const copy = overlay.querySelector(".codex-marimo-loading-copy");
+            if (copy) {
+              copy.innerHTML = "Still loading the report. Large W&amp;B exports can take a bit on first paint, especially with heavy charts and media panels.";
+            }
+          }, 5000);
+        }, { once: true });
+        window.setTimeout(() => {
+          if (hasRenderedContent()) {
+            observer.disconnect();
+            hide();
+          }
+        }, 15000);
+      })();
+    </script>
+    """
+    text = text.replace("</head>", overlay_style + "\n  </head>")
+    text = text.replace("<body>", "<body>\n" + overlay_html)
+    text = text.replace("</body>", overlay_script + "\n  </body>")
+    index_path.write_text(text, encoding="utf-8")
+
+
 def main() -> None:
     python_bin = python_with_marimo()
     if python_bin is None:
@@ -91,6 +228,7 @@ def main() -> None:
     if APP_MEDIA_DIR.exists():
         shutil.copytree(APP_MEDIA_DIR, OUTPUT_DIR / "media", dirs_exist_ok=True)
     patch_marimo_worker_imports()
+    inject_loading_overlay()
     print(f"[ok] exported marimo viewer to {OUTPUT_DIR.relative_to(ROOT)}")
 
 
