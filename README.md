@@ -9,6 +9,11 @@ The goal is report-first export: preserve the original W&B report structure, pan
 
 This repository ships a fixed MNIST sample snapshot under `examples/mnist-sample/processed/`.
 
+Public demo:
+
+- Exported static sample: <https://nejumi.github.io/wandb-report-exporter/>
+- Original W&B Report: <https://wandb.ai/wandb-japan/mnist-pytorch-20260309_073605/reports/Sample-Report--VmlldzoxNjQ0Njg4Ng>
+
 Use it locally:
 
 ```bash
