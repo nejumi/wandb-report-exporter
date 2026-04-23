@@ -1,8 +1,9 @@
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 PORT ?= 8000
 MARIMO_PORT ?= 8124
+SAMPLE_PROCESSED ?= examples/mnist-sample/processed
 
-.PHONY: export verify-export build serve dev marimo-notebook marimo-build marimo-serve stop marimo-stop
+.PHONY: export verify-export build serve dev marimo-notebook marimo-build marimo-serve sample-build stop marimo-stop
 
 export:
 	$(PYTHON) scripts/export_wandb_snapshot.py
@@ -24,6 +25,9 @@ marimo-notebook:
 
 marimo-build:
 	$(PYTHON) scripts/export_marimo_wasm.py
+
+sample-build:
+	WANDB_PROCESSED_DIR=$(SAMPLE_PROCESSED) $(PYTHON) scripts/export_marimo_wasm.py
 
 marimo-serve:
 	exec $(PYTHON) -m http.server $(MARIMO_PORT) -d marimo_viewer/dist

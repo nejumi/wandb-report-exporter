@@ -1,0 +1,689 @@
+{
+  "report_url": "https://wandb.ai/wandb-japan/mnist-pytorch-20260309_073605/reports/Sample-Report--VmlldzoxNjQ0Njg4Ng",
+  "title": "Sample Report",
+  "selected_table_name": null,
+  "selected_table_artifact": null,
+  "selected_runset": {
+    "id": "iiozisxwp",
+    "name": "Run set",
+    "entity": "wandb-japan",
+    "project": "mnist-pytorch-20260309_073605",
+    "order": "-createdAt",
+    "filters": null,
+    "search": {
+      "query": ""
+    },
+    "matched_run_count": 5,
+    "single_run_only": false,
+    "selection_run_ids": [],
+    "selection_names": [],
+    "selection_mode": null,
+    "resolution": "filters"
+  },
+  "runsets": [
+    {
+      "id": "iiozisxwp",
+      "name": "Run set",
+      "filters": {
+        "op": "OR",
+        "filters": [
+          {
+            "op": "AND",
+            "filters": []
+          }
+        ]
+      },
+      "filters_ref": {
+        "type": "filters",
+        "viewID": "mq7a73jo2",
+        "id": "fcakh1e1q"
+      },
+      "sort": {
+        "keys": [
+          {
+            "key": {
+              "section": "run",
+              "name": "createdAt"
+            },
+            "ascending": false
+          }
+        ]
+      },
+      "sort_ref": {
+        "type": "sort",
+        "viewID": "mq7a73jo2",
+        "id": "7nevu6cmw"
+      },
+      "search": {
+        "query": ""
+      },
+      "only_show_selected": false,
+      "selections": {
+        "root": 1,
+        "bounds": [],
+        "tree": []
+      },
+      "group_selections_ref": {
+        "type": "group-selections",
+        "viewID": "mq7a73jo2",
+        "id": "963k8erzv"
+      },
+      "project": {
+        "entityName": "wandb-japan",
+        "name": "mnist-pytorch-20260309_073605",
+        "id": "UHJvamVjdEludGVybmFsSWQ6NDM4MTUyNjE="
+      },
+      "block_type": "panel-grid",
+      "single_run_only": false,
+      "visible_run_ids": [],
+      "visible_run_names": []
+    }
+  ],
+  "table_candidates": [
+    "pred_table",
+    "validation_prediction_table",
+    "EDA_table_before_training"
+  ],
+  "blocks": [
+    {
+      "type": "html",
+      "html": "<h1>Section 1</h1>"
+    },
+    {
+      "type": "panel-grid",
+      "title": "Embedded W&B panel",
+      "runsets": [
+        "iiozisxwp"
+      ],
+      "table_candidates": [],
+      "panels": [
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "validation_loss"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 8,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "validation_accuracy"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 16,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "train_loss"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        }
+      ]
+    },
+    {
+      "type": "panel-grid",
+      "title": "Embedded W&B panel",
+      "runsets": [
+        "iiozisxwp"
+      ],
+      "table_candidates": [],
+      "panels": [
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/layer2.0.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 8,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/layer2.0.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 16,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/layer1.0.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 0,
+            "y": 6,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/layer1.0.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 8,
+            "y": 6,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/graph_1layer2.0.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 16,
+            "y": 6,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/graph_1layer2.0.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 0,
+            "y": 12,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/graph_1layer1.0.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 8,
+            "y": 12,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/graph_1layer1.0.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 16,
+            "y": 12,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/graph_1fc.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 0,
+            "y": 18,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/graph_1fc.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 8,
+            "y": 18,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/fc.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 16,
+            "y": 18,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "parameters/fc.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        }
+      ]
+    },
+    {
+      "type": "panel-grid",
+      "title": "Embedded W&B panel",
+      "runsets": [
+        "iiozisxwp"
+      ],
+      "table_candidates": [],
+      "panels": [
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/layer2.0.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 8,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/layer2.0.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 16,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/layer1.0.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 0,
+            "y": 6,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/layer1.0.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 8,
+            "y": 6,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/graph_1layer2.0.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 16,
+            "y": 6,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/graph_1layer2.0.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 0,
+            "y": 12,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/graph_1layer1.0.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 8,
+            "y": 12,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/graph_1layer1.0.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 16,
+            "y": 12,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/graph_1fc.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 0,
+            "y": 18,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/graph_1fc.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 8,
+            "y": 18,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/fc.weight"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        },
+        {
+          "view_type": "Run History Line Plot",
+          "layout": {
+            "x": 16,
+            "y": 18,
+            "w": 8,
+            "h": 6
+          },
+          "metrics": [
+            "gradients/fc.bias"
+          ],
+          "x_axis": "_step",
+          "legend_fields": [
+            "run:displayName"
+          ],
+          "smoothing_type": "",
+          "smoothing_weight": null
+        }
+      ]
+    },
+    {
+      "type": "panel-grid",
+      "title": "Embedded W&B panel",
+      "runsets": [
+        "iiozisxwp"
+      ],
+      "table_candidates": [
+        "pred_table",
+        "validation_prediction_table",
+        "EDA_table_before_training"
+      ],
+      "panels": [
+        {
+          "view_type": "Weave",
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "simple_filter": null,
+          "panel_id": "",
+          "mode": "table",
+          "table_key": "validation_prediction_table"
+        },
+        {
+          "view_type": "Weave",
+          "layout": {
+            "x": 8,
+            "y": 0,
+            "w": 8,
+            "h": 6
+          },
+          "simple_filter": null,
+          "panel_id": "panel-stepper",
+          "mode": "table",
+          "table_key": "EDA_table_before_training"
+        }
+      ]
+    }
+  ],
+  "panel_tables": {
+    "validation_prediction_table": {
+      "path": "panel_tables/validation-prediction-table.json",
+      "rows": 1912,
+      "run_ids": [
+        "cpgw1lwk",
+        "cus5rcdr",
+        "fptb5l7a",
+        "hab9g3h5",
+        "yhhp1xfm"
+      ],
+      "run_names": [
+        "absurd-feather-5",
+        "avid-rain-2",
+        "crimson-puddle-1",
+        "dark-frog-3",
+        "fearless-armadillo-4"
+      ],
+      "needs_hydration": false
+    },
+    "EDA_table_before_training": {
+      "path": "panel_tables/eda-table-before-training.json",
+      "rows": 7000,
+      "run_ids": [
+        "cpgw1lwk",
+        "cus5rcdr",
+        "fptb5l7a",
+        "hab9g3h5",
+        "yhhp1xfm"
+      ],
+      "run_names": [
+        "absurd-feather-5",
+        "avid-rain-2",
+        "crimson-puddle-1",
+        "dark-frog-3",
+        "fearless-armadillo-4"
+      ],
+      "needs_hydration": false
+    }
+  }
+}

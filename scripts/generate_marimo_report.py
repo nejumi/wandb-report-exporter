@@ -6,6 +6,7 @@ import hashlib
 import html
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -18,7 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROCESSED_DIR = ROOT / "extracted" / "processed"
+PROCESSED_DIR = Path(os.environ.get("WANDB_PROCESSED_DIR", ROOT / "extracted" / "processed")).resolve()
 MARIMO_VIEWER_DIR = ROOT / "marimo_viewer"
 NOTEBOOK_PATH = MARIMO_VIEWER_DIR / "wandb_report.py"
 GENERATED_ASSETS_DIR = MARIMO_VIEWER_DIR / "generated_assets"

@@ -5,6 +5,19 @@ This repository currently focuses on exporting a W&B Report into a `marimo HTML-
 
 The goal is report-first export: preserve the original W&B report structure, panels, tables, media, and chart behavior as much as possible while serving everything from local files.
 
+## Public Sample
+
+This repository ships a fixed MNIST sample snapshot under `examples/mnist-sample/processed/`.
+
+Use it locally:
+
+```bash
+make sample-build
+make marimo-serve
+```
+
+The repository also includes a GitHub Pages workflow that builds the same sample into a public static demo on pushes to `main` and via manual dispatch.
+
 ## What It Exports
 
 `scripts/export_wandb_snapshot.py` builds a snapshot with:
@@ -111,6 +124,13 @@ make marimo-build
 make marimo-serve
 ```
 
+### Build the fixed public sample locally
+
+```bash
+make sample-build
+make marimo-serve
+```
+
 If you prefer not to use environment variables, run the export step directly with the report URL instead of `make export`.
 
 ### Stop the local marimo server
@@ -123,6 +143,7 @@ make marimo-stop
 
 - `extracted/processed/`: canonical exported snapshot
 - `extracted/snapshots/<report-slug>-<hash>/<timestamp>/processed/`: archived snapshots kept per exported report for repeat testing
+- `examples/mnist-sample/processed/`: fixed sample snapshot used for the public demo and local sample builds
 - `marimo_viewer/wandb_report.py`: generated marimo notebook
 - `marimo_viewer/dist/`: final marimo HTML-WASM site
 - `app/src/data/`: data bundle for the legacy Observable reference viewer
@@ -209,6 +230,7 @@ In short: this project aims for graceful degradation. If a panel cannot yet be r
 
 - `uv run python scripts/generate_marimo_report.py` regenerates the marimo notebook from the current snapshot
 - `uv run python scripts/export_marimo_wasm.py` regenerates the HTML-WASM marimo site
+- `WANDB_PROCESSED_DIR=examples/mnist-sample/processed uv run python scripts/export_marimo_wasm.py` builds the fixed MNIST sample instead of the current working snapshot
 - `uv run python scripts/verify_export.py` validates that the exported snapshot has the files and offline rows needed by the marimo renderer
 - `npm run build` still builds the Observable reference viewer and syncs static assets into `dist/`
 
