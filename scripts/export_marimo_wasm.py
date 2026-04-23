@@ -15,6 +15,7 @@ NOTEBOOK_PATH = ROOT / "marimo_viewer" / "wandb_report.py"
 GENERATED_ASSETS_DIR = ROOT / "marimo_viewer" / "generated_assets"
 OUTPUT_DIR = ROOT / "marimo_viewer" / "dist"
 MARIMO_CONFIG_DIR = ROOT / ".marimo-config"
+PROCESSED_DIR = Path(os.environ.get("WANDB_PROCESSED_DIR", ROOT / "extracted" / "processed")).resolve()
 APP_MEDIA_DIR = ROOT / "app" / "src" / "media"
 
 
@@ -225,8 +226,14 @@ def main() -> None:
             shutil.rmtree(generated_assets_output_dir)
         shutil.copytree(GENERATED_ASSETS_DIR, OUTPUT_DIR / GENERATED_ASSETS_DIR.name, dirs_exist_ok=True)
         shutil.copytree(GENERATED_ASSETS_DIR, OUTPUT_DIR / "assets" / GENERATED_ASSETS_DIR.name, dirs_exist_ok=True)
-    if APP_MEDIA_DIR.exists():
-        shutil.copytree(APP_MEDIA_DIR, OUTPUT_DIR / "media", dirs_exist_ok=True)
+    processed_media_dir = PROCESSED_DIR / "media"
+    output_media_dir = OUTPUT_DIR / "media"
+    if output_media_dir.exists():
+        shutil.rmtree(output_media_dir)
+    if processed_media_dir.exists():
+        shutil.copytree(processed_media_dir, output_media_dir, dirs_exist_ok=True)
+    elif APP_MEDIA_DIR.exists():
+        shutil.copytree(APP_MEDIA_DIR, output_media_dir, dirs_exist_ok=True)
     patch_marimo_worker_imports()
     inject_loading_overlay()
     print(f"[ok] exported marimo viewer to {OUTPUT_DIR.relative_to(ROOT)}")
