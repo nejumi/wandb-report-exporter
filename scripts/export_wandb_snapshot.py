@@ -37,8 +37,10 @@ except Exception:  # pragma: no cover - provided by wandb in normal installs
 ROOT = Path(__file__).resolve().parents[1]
 FINAL_RAW_DIR = ROOT / "extracted" / "raw"
 FINAL_PROCESSED_DIR = ROOT / "extracted" / "processed"
+FINAL_SNAPSHOTS_DIR = ROOT / "extracted" / "snapshots"
 FINAL_APP_DATA_DIR = ROOT / "app" / "src" / "data"
 FINAL_APP_MEDIA_DIR = ROOT / "app" / "src" / "media"
+ARTIFACT_DOWNLOAD_DIR = ROOT / "artifacts"
 STAGING_ROOT_DIR = ROOT / ".snapshot-staging"
 CACHE_ROOT_DIR = ROOT / ".snapshot-cache"
 HISTORY_CACHE_DIR = CACHE_ROOT_DIR / "history"
@@ -48,6 +50,7 @@ APP_DATA_DIR = FINAL_APP_DATA_DIR
 APP_MEDIA_DIR = FINAL_APP_MEDIA_DIR
 PANEL_TABLES_DIRNAME = "panel_tables"
 HISTORY_CACHE_VERSION = "v2"
+SNAPSHOT_CACHE_VERSION = "v2"
 EXPORT_TIMER_START: float | None = None
 
 VIEWS2_RAW_VIEW_QUERY = """
@@ -89,6 +92,7 @@ class ExportConfig:
     max_runs: int
     sample_data: bool
     enable_primary_table_scan: bool
+    refresh_snapshot_cache: bool
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -134,6 +138,11 @@ def parse_args() -> ExportConfig:
         action="store_true",
         help="Opt into the slower legacy primary-table scan used by the old Observable viewer fallback.",
     )
+    parser.add_argument(
+        "--refresh-snapshot-cache",
+        action="store_true",
+        help="Force a fresh export even if a matching archived snapshot already exists.",
+    )
     parser.add_argument("--sample-data", action="store_true", help="Force sample snapshot generation.")
     args = parser.parse_args()
     report_url = args.report_url_arg or args.report_url
@@ -160,6 +169,7 @@ def parse_args() -> ExportConfig:
         max_runs=args.max_runs,
         sample_data=sample_data,
         enable_primary_table_scan=enable_primary_table_scan,
+        refresh_snapshot_cache=args.refresh_snapshot_cache or env_flag("WANDB_REFRESH_SNAPSHOT_CACHE", False),
     )
 
 
@@ -220,7 +230,49 @@ def replace_directory(source: Path, target: Path) -> None:
     os.replace(source, target)
 
 
+def copy_directory(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target)
+
+
+def snapshot_archive_dir(processed_dir: Path) -> Path:
+    manifest_path = processed_dir / "report_manifest.json"
+    snapshot_name = "sample"
+    generated_at = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            manifest = {}
+        report = manifest.get("report") if isinstance(manifest, dict) else {}
+        report_url = str((manifest.get("report_url") if isinstance(manifest, dict) else None) or (report or {}).get("report_url") or "")
+        title = str((report or {}).get("title") or "")
+        source_token = title or Path(urlparse(report_url).path).name or "sample"
+        slug = slugify(source_token)[:64] or "sample"
+        digest_source = report_url or title or "sample"
+        digest = hashlib.sha1(digest_source.encode("utf-8")).hexdigest()[:8]
+        generated_value = manifest.get("generated_at") if isinstance(manifest, dict) else None
+        if isinstance(generated_value, str) and generated_value:
+            generated_at = (
+                generated_value.replace(":", "").replace("T", "-").replace("+00:00", "Z").replace(".", "-")
+            )
+        snapshot_name = f"{slug}-{digest}"
+    return FINAL_SNAPSHOTS_DIR / snapshot_name / generated_at
+
+
 def commit_snapshot_output(stage_root: Path) -> None:
+    archive_dir = snapshot_archive_dir(PROCESSED_DIR)
+    archive_processed_dir = archive_dir / "processed"
+    archive_processed_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(PROCESSED_DIR, archive_processed_dir, dirs_exist_ok=True)
+    if RAW_DIR.exists():
+        shutil.copytree(RAW_DIR, archive_dir / "raw", dirs_exist_ok=True)
+    if APP_DATA_DIR.exists():
+        shutil.copytree(APP_DATA_DIR, archive_dir / "app_data", dirs_exist_ok=True)
+    if APP_MEDIA_DIR.exists():
+        shutil.copytree(APP_MEDIA_DIR, archive_dir / "app_media", dirs_exist_ok=True)
     replace_directory(PROCESSED_DIR, FINAL_PROCESSED_DIR)
     replace_directory(APP_DATA_DIR, FINAL_APP_DATA_DIR)
     replace_directory(APP_MEDIA_DIR, FINAL_APP_MEDIA_DIR)
@@ -228,11 +280,91 @@ def commit_snapshot_output(stage_root: Path) -> None:
         replace_directory(RAW_DIR, FINAL_RAW_DIR)
     shutil.rmtree(stage_root, ignore_errors=True)
     reset_output_roots()
+    print(f"[done] archived snapshot in {archive_processed_dir}")
 
 
 def cleanup_staging_output(stage_root: Path) -> None:
     shutil.rmtree(stage_root, ignore_errors=True)
     reset_output_roots()
+
+
+def report_updated_at(report: Any | None) -> str | None:
+    if report is None:
+        return None
+    value = getattr(report, "updated_at", None)
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def report_spec_hash(report: Any | None) -> str | None:
+    spec = getattr(report, "spec", None) if report is not None else None
+    if not isinstance(spec, dict):
+        return None
+    encoded = json.dumps(sanitize_json_value(spec), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()
+
+
+def snapshot_cache_metadata(config: ExportConfig, report: Any | None) -> dict[str, Any]:
+    return {
+        "snapshot_cache_version": SNAPSHOT_CACHE_VERSION,
+        "report_url": config.report_url,
+        "report_id": getattr(report, "id", None) if report is not None else None,
+        "report_title": getattr(report, "display_name", None) if report is not None else None,
+        "report_updated_at": report_updated_at(report),
+        "report_spec_hash": report_spec_hash(report),
+        "entity": config.entity,
+        "project": config.project,
+        "sample_data": config.sample_data,
+    }
+
+
+def iter_snapshot_archives() -> list[Path]:
+    if not FINAL_SNAPSHOTS_DIR.exists():
+        return []
+    manifests = sorted(FINAL_SNAPSHOTS_DIR.glob("*/*/processed/report_manifest.json"), reverse=True)
+    return [path.parent.parent for path in manifests]
+
+
+def find_matching_snapshot_archive(cache_meta: dict[str, Any]) -> Path | None:
+    report_url = str(cache_meta.get("report_url") or "")
+    if not report_url:
+        return None
+    for archive_dir in iter_snapshot_archives():
+        manifest_path = archive_dir / "processed" / "report_manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        existing_meta = manifest.get("snapshot_cache") if isinstance(manifest, dict) else None
+        if not isinstance(existing_meta, dict):
+            continue
+        if str(existing_meta.get("snapshot_cache_version") or "") != str(cache_meta.get("snapshot_cache_version") or ""):
+            continue
+        if str(existing_meta.get("report_url") or "") != report_url:
+            continue
+        if str(existing_meta.get("report_updated_at") or "") and str(existing_meta.get("report_updated_at")) != str(cache_meta.get("report_updated_at") or ""):
+            continue
+        if str(existing_meta.get("report_spec_hash") or "") and str(existing_meta.get("report_spec_hash")) != str(cache_meta.get("report_spec_hash") or ""):
+            continue
+        return archive_dir
+    return None
+
+
+def restore_snapshot_archive(archive_dir: Path) -> None:
+    processed_dir = archive_dir / "processed"
+    if not processed_dir.exists():
+        raise FileNotFoundError(f"archived processed snapshot is missing at {processed_dir}")
+    copy_directory(processed_dir, FINAL_PROCESSED_DIR)
+    raw_dir = archive_dir / "raw"
+    if raw_dir.exists():
+        copy_directory(raw_dir, FINAL_RAW_DIR)
+    app_data_dir = archive_dir / "app_data"
+    if app_data_dir.exists():
+        copy_directory(app_data_dir, FINAL_APP_DATA_DIR)
+    app_media_dir = archive_dir / "app_media"
+    if app_media_dir.exists():
+        copy_directory(app_media_dir, FINAL_APP_MEDIA_DIR)
 
 
 def export_worker_count(task_count: int) -> int:
@@ -435,6 +567,11 @@ def sample_snapshot(config: ExportConfig) -> None:
         table_rows=table_rows,
         media_items=media_manifest,
         source="sample",
+        snapshot_cache={
+            "snapshot_cache_version": SNAPSHOT_CACHE_VERSION,
+            "report_url": config.report_url,
+            "sample_data": True,
+        },
         report_data={
             "report_url": config.report_url,
             "title": "Sample imported report",
@@ -1365,6 +1502,7 @@ def resolve_report(api: Any, config: ExportConfig) -> tuple[Any | None, list[dic
                         id=latest_view.get("id"),
                         url=config.report_url,
                         display_name=latest_view.get("displayName"),
+                        updated_at=latest_view.get("updatedAt"),
                         spec=spec_object,
                     )
                     runsets = collect_runsets_from_report(spec_object)
@@ -1818,7 +1956,27 @@ def serialise_wandb_image(value: Any) -> dict[str, Any]:
     return payload
 
 
-def serialise_cell(value: Any) -> Any:
+def serialise_artifact_media_dict(value: dict[str, Any], artifact_root: Path | None = None) -> dict[str, Any] | None:
+    media_type = str(value.get("_type") or "")
+    if "image-file" not in media_type:
+        return None
+    relative_path = value.get("path")
+    if not isinstance(relative_path, str) or artifact_root is None:
+        return None
+    copied_path = copy_local_media_file(artifact_root / relative_path, "images")
+    if not copied_path:
+        return None
+    payload: dict[str, Any] = {
+        "_kind": "image",
+        "path": copied_path,
+    }
+    for key in ("width", "height", "format", "sha256", "caption"):
+        if value.get(key) is not None:
+            payload[key] = sanitize_json_value(value.get(key))
+    return payload
+
+
+def serialise_cell(value: Any, artifact_root: Path | None = None) -> Any:
     if value is None:
         return None
     if isinstance(value, (str, int, float, bool)):
@@ -1828,6 +1986,8 @@ def serialise_cell(value: Any) -> Any:
     if hasattr(value, "_path"):
         return serialise_wandb_image(value)
     if isinstance(value, dict):
+        if artifact_media := serialise_artifact_media_dict(value, artifact_root):
+            return artifact_media
         return sanitize_json_value(value)
     if isinstance(value, list):
         return sanitize_json_value(value)
@@ -1944,7 +2104,7 @@ def _extract_rows_from_artifact_candidate(
     return table_to_rows(frame, artifact, run_map)
 
 
-def load_table_file_rows(path: Path) -> list[dict[str, Any]]:
+def load_table_file_rows(path: Path, artifact_root: Path | None = None) -> list[dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     columns = payload.get("columns", [])
     data = payload.get("data", [])
@@ -1954,11 +2114,61 @@ def load_table_file_rows(path: Path) -> list[dict[str, Any]]:
     for row in data:
         if not isinstance(row, list):
             continue
-        rows.append({str(column): serialise_cell(value) for column, value in zip(columns, row)})
+        rows.append({str(column): serialise_cell(value, artifact_root=artifact_root) for column, value in zip(columns, row)})
     return rows
 
 
+def local_artifact_table_rows(
+    artifact: Any,
+    candidate_names: list[str],
+    run_id: str,
+    run_meta: dict[str, Any],
+) -> list[dict[str, Any]]:
+    try:
+        artifact_dir = Path(artifact.download(root=str(ARTIFACT_DOWNLOAD_DIR)))
+    except Exception as exc:
+        print(f"[warn] failed to download artifact {getattr(artifact, 'source_name', '<artifact>')}: {exc}")
+        return []
+    candidate_tokens: set[str] = set()
+    for candidate_name in candidate_names:
+        for token_source in (
+            candidate_name,
+            Path(candidate_name).name,
+            Path(candidate_name).stem,
+            Path(candidate_name).stem.removesuffix(".table"),
+        ):
+            token = re.sub(r"[^a-z0-9]+", "", str(token_source).lower())
+            if token:
+                candidate_tokens.add(token)
+    for path in sorted(artifact_dir.rglob("*.table.json")):
+        path_tokens = {
+            re.sub(r"[^a-z0-9]+", "", str(token_source).lower())
+            for token_source in (
+                path.name,
+                path.stem,
+                path.stem.removesuffix(".table"),
+            )
+        }
+        if candidate_tokens.isdisjoint({token for token in path_tokens if token}):
+            continue
+        table_rows = load_table_file_rows(path, artifact_root=artifact_dir)
+        if not table_rows:
+            continue
+        return [
+            {
+                "__run_id": run_id,
+                "__run_name": run_meta.get("run_name"),
+                "__wandb_url": run_meta.get("wandb_url"),
+                **row,
+            }
+            for row in table_rows
+        ]
+    return []
+
+
 def materialize_table_rows_from_artifact(artifact: Any, candidate_names: list[str], run_id: str, run_meta: dict[str, Any]) -> list[dict[str, Any]]:
+    if local_rows := local_artifact_table_rows(artifact, candidate_names, run_id, run_meta):
+        return local_rows
     for candidate_name in candidate_names:
         try:
             table = artifact.get(candidate_name)
@@ -2424,8 +2634,8 @@ def export_panel_tables(
         if not combined_rows:
             continue
         needs_hydration = False
-        if any(isinstance(row, dict) and row.get("Image") == "Image" for row in combined_rows):
-            fallback_rows = hydrated_rows or parse_table_prediction_meta_rows(PROCESSED_DIR / "table_predictions.parquet")
+        if any(row_has_media_placeholders(row) for row in combined_rows if isinstance(row, dict)):
+            fallback_rows = hydrated_rows or hydrate_panel_table_rows(run_map, table_key)
             if fallback_rows:
                 combined_rows = fallback_rows
             else:
@@ -2457,17 +2667,26 @@ def export_panel_tables(
     return exports
 
 
-def _load_panel_table_rows_for_run(table_key: str, run_id: str, run_meta: dict[str, Any]) -> list[dict[str, Any]]:
-    run_obj = run_meta["_run_object"]
-    table_ref = getattr(run_obj, "summary", {}).get(table_key)
+def row_has_media_placeholders(row: dict[str, Any]) -> bool:
+    for key, value in row.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        normalized_key = re.sub(r"[^a-z0-9]+", "", key.lower())
+        normalized_value = re.sub(r"[^a-z0-9]+", "", value.lower())
+        if normalized_key in {"image", "images", "media", "file", "files"} and normalized_value == normalized_key:
+            return True
+    return False
+
+
+def rows_need_media_hydration(rows: list[dict[str, Any]]) -> bool:
+    return any(row_has_media_placeholders(row) for row in rows if isinstance(row, dict))
+
+
+def panel_table_candidate_names(table_key: str, table_ref: Any) -> tuple[list[str], str]:
     artifact_path_hint = ""
     preferred_names = [table_key, slugify(table_key), slugify(table_key).replace("-", "_")]
-    direct_path = None
-    direct_type = ""
     if hasattr(table_ref, "get"):
         artifact_path_hint = str(table_ref.get("artifact_path") or table_ref.get("_latest_artifact_path") or "")
-        direct_path = table_ref.get("path")
-        direct_type = str(table_ref.get("_type") or "")
         artifact_hint_name = Path(artifact_path_hint).name if artifact_path_hint else ""
         if artifact_hint_name:
             preferred_names = dedupe_strings(
@@ -2478,9 +2697,17 @@ def _load_panel_table_rows_for_run(table_key: str, run_id: str, run_meta: dict[s
                     *preferred_names,
                 ]
             )
+    return preferred_names, artifact_path_hint
+
+
+def load_panel_table_rows_from_artifacts(table_key: str, run_id: str, run_meta: dict[str, Any]) -> list[dict[str, Any]]:
+    run_obj = run_meta["_run_object"]
+    table_ref = getattr(run_obj, "summary", {}).get(table_key)
+    preferred_names, artifact_path_hint = panel_table_candidate_names(table_key, table_ref)
+    placeholder_rows: list[dict[str, Any]] = []
     try:
         for artifact in run_obj.logged_artifacts():
-            if not artifact_matches_table_key(artifact, table_key, artifact_path_hint):
+            if artifact_path_hint and not artifact_matches_table_key(artifact, table_key, artifact_path_hint):
                 continue
             rows = materialize_table_rows_from_artifact(
                 artifact,
@@ -2488,15 +2715,45 @@ def _load_panel_table_rows_for_run(table_key: str, run_id: str, run_meta: dict[s
                 run_id,
                 run_meta,
             )
-            if rows:
+            if not rows:
+                continue
+            if not rows_need_media_hydration(rows):
                 return rows
+            if not placeholder_rows:
+                placeholder_rows = rows
     except Exception as exc:
         print(f"[warn] failed to materialize panel table {table_key} for run {run_id}: {exc}")
+    return placeholder_rows
+
+
+def hydrate_panel_table_rows(run_map: dict[str, dict[str, Any]], table_key: str) -> list[dict[str, Any]]:
+    hydrated_rows: list[dict[str, Any]] = []
+    for run_id, run_meta in run_map.items():
+        if run_meta.get("_run_object") is None:
+            continue
+        rows = load_panel_table_rows_from_artifacts(table_key, run_id, run_meta)
+        if rows and not rows_need_media_hydration(rows):
+            hydrated_rows.extend(rows)
+    return hydrated_rows
+
+
+def _load_panel_table_rows_for_run(table_key: str, run_id: str, run_meta: dict[str, Any]) -> list[dict[str, Any]]:
+    run_obj = run_meta["_run_object"]
+    table_ref = getattr(run_obj, "summary", {}).get(table_key)
+    _preferred_names, artifact_path_hint = panel_table_candidate_names(table_key, table_ref)
+    direct_path = None
+    direct_type = ""
+    if hasattr(table_ref, "get"):
+        direct_path = table_ref.get("path")
+        direct_type = str(table_ref.get("_type") or "")
+    artifact_rows = load_panel_table_rows_from_artifacts(table_key, run_id, run_meta)
+    if artifact_rows and not rows_need_media_hydration(artifact_rows):
+        return artifact_rows
     if direct_path and direct_type == "table-file":
         try:
             downloaded = run_obj.file(direct_path).download(root=str(PROCESSED_DIR), replace=True)
             table_rows = load_table_file_rows(Path(downloaded.name))
-            return [
+            direct_rows = [
                 {
                     "__run_id": run_id,
                     "__run_name": run_meta.get("run_name"),
@@ -2505,16 +2762,19 @@ def _load_panel_table_rows_for_run(table_key: str, run_id: str, run_meta: dict[s
                 }
                 for row in table_rows
             ]
+            if not rows_need_media_hydration(direct_rows):
+                return direct_rows
+            return artifact_rows or direct_rows
         except Exception as exc:
             print(f"[warn] failed to download direct table-file {table_key} for run {run_id}: {exc}")
     if not hasattr(table_ref, "get"):
-        return []
+        return artifact_rows
     path = table_ref.get("path")
     if not path:
-        return []
+        return artifact_rows
     downloaded = run_obj.file(path).download(root=str(PROCESSED_DIR), replace=True)
     table_rows = load_table_file_rows(Path(downloaded.name))
-    return [
+    direct_rows = [
         {
             "__run_id": run_id,
             "__run_name": run_meta.get("run_name"),
@@ -2523,6 +2783,9 @@ def _load_panel_table_rows_for_run(table_key: str, run_id: str, run_meta: dict[s
         }
         for row in table_rows
     ]
+    if not rows_need_media_hydration(direct_rows):
+        return direct_rows
+    return artifact_rows or direct_rows
 
 
 def build_manifest(
@@ -2534,6 +2797,7 @@ def build_manifest(
     source: str,
     report_data: dict[str, Any] | None = None,
     panel_tables: dict[str, dict[str, Any]] | None = None,
+    snapshot_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     generated_at = datetime.now(timezone.utc).isoformat()
     overview_description = (
@@ -2546,6 +2810,7 @@ def build_manifest(
         "entity": config.entity,
         "project": config.project,
         "report_url": config.report_url,
+        "snapshot_cache": snapshot_cache or {},
         "counts": {
             "runs": len(run_rows),
             "history_rows": len(history_rows),
@@ -2698,18 +2963,25 @@ def persist_snapshot(
         shutil.copytree(panel_tables_src, APP_DATA_DIR / PANEL_TABLES_DIRNAME, dirs_exist_ok=True)
 
 
-def real_snapshot(config: ExportConfig) -> None:
+def real_snapshot(config: ExportConfig) -> bool:
     if wandb is None:
         raise RuntimeError("wandb is not installed; run `uv sync` first.")
 
     api = wandb.Api(timeout=60)
     phase_started = time.perf_counter()
     report, report_runsets, report_table_candidates = resolve_report(api, config)
+    cache_meta = snapshot_cache_metadata(config, report)
     log_info(
         "resolved report metadata in "
         f"{format_duration(time.perf_counter() - phase_started)}: "
         f"{len(report_runsets)} runsets, {len(report_table_candidates)} table candidates"
     )
+    if not config.refresh_snapshot_cache and not config.enable_primary_table_scan:
+        archive_dir = find_matching_snapshot_archive(cache_meta)
+        if archive_dir is not None:
+            restore_snapshot_archive(archive_dir)
+            log_info(f"restored matching snapshot cache from {archive_dir}")
+            return True
 
     selected_runset_summary = None
     selected_runs: list[Any] = []
@@ -2841,6 +3113,30 @@ def real_snapshot(config: ExportConfig) -> None:
     panel_table_keys = collect_panel_table_keys(normalized_blocks)
     hydrated_panel_rows = table_prediction_meta_rows_from_records(table_rows) if table_rows else []
     panel_tables = export_panel_tables(run_map, panel_table_keys, hydrated_rows=hydrated_panel_rows)
+    if (
+        panel_table_keys
+        and not table_rows
+        and any(isinstance(meta, dict) and meta.get("needs_hydration") for meta in panel_tables.values())
+    ):
+        hydration_phase_started = time.perf_counter()
+        log_info(
+            "panel tables need media hydration; running targeted legacy table scan "
+            f"for {len(report_table_candidates)} report table candidates"
+        )
+        table_rows, hydration_media_items, selected_table_name, selected_table_artifact = extract_table_rows(
+            api,
+            config,
+            run_map,
+            report_table_candidates,
+        )
+        if hydration_media_items:
+            media_items.extend(hydration_media_items)
+        hydrated_panel_rows = table_prediction_meta_rows_from_records(table_rows) if table_rows else []
+        panel_tables = export_panel_tables(run_map, panel_table_keys, hydrated_rows=hydrated_panel_rows)
+        log_info(
+            "panel table hydration scan complete: "
+            f"{len(table_rows)} legacy rows in {format_duration(time.perf_counter() - hydration_phase_started)}"
+        )
     log_info(f"panel table export complete in {format_duration(time.perf_counter() - phase_started)}")
     normalized_blocks = enrich_block_visible_runs(normalized_blocks, report_runsets, panel_tables)
     report_runsets = enrich_runset_visible_runs(report_runsets, normalized_blocks, panel_tables)
@@ -2864,10 +3160,12 @@ def real_snapshot(config: ExportConfig) -> None:
         source="wandb",
         report_data=report_data,
         panel_tables=panel_tables,
+        snapshot_cache=cache_meta,
     )
     phase_started = time.perf_counter()
     persist_snapshot(run_rows, history_rows, table_rows, media_items, manifest)
     log_info(f"persisted snapshot files in {format_duration(time.perf_counter() - phase_started)}")
+    return False
 
 
 def main() -> None:
@@ -2875,6 +3173,7 @@ def main() -> None:
     begin_export_timer()
     stage_root = begin_snapshot_output()
     try:
+        restored_from_cache = False
         if config.sample_data:
             log_info("generating sample snapshot (set WANDB_API_KEY + entity/project to export real data)")
             sample_snapshot(config)
@@ -2883,8 +3182,11 @@ def main() -> None:
                 log_info(f"exporting snapshot for {config.report_url}")
             else:
                 log_info(f"exporting snapshot from {config.entity}/{config.project}")
-            real_snapshot(config)
-        commit_snapshot_output(stage_root)
+            restored_from_cache = real_snapshot(config)
+        if restored_from_cache:
+            cleanup_staging_output(stage_root)
+        else:
+            commit_snapshot_output(stage_root)
     except Exception:
         cleanup_staging_output(stage_root)
         raise

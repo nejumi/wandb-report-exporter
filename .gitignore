@@ -13,6 +13,7 @@ app/src/media/
 .snapshot-cache/
 extracted/raw/
 extracted/processed/
+extracted/snapshots/
 artifacts/
 output/
 marimo_viewer/__pycache__/

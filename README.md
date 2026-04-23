@@ -33,10 +33,12 @@ The exported snapshot is then consumed by:
 uv sync
 ```
 
-If you want report export extras and marimo export support:
+This installs the default marimo-first toolchain, including the exporter and marimo HTML-WASM build support.
+
+If you need the optional report/workspace extras:
 
 ```bash
-uv sync --extra reports --extra marimo
+uv sync --extra reports
 ```
 
 ### Frontend
@@ -44,6 +46,8 @@ uv sync --extra reports --extra marimo
 ```bash
 npm install
 ```
+
+The frontend uses Node.js `>=20`.
 
 ## Configuration
 
@@ -74,7 +78,7 @@ WANDB_BASE_URL="https://wandb.my-company.example" wandb login --relogin
 ### 1. Export a report snapshot
 
 ```bash
-python3 scripts/export_wandb_snapshot.py "https://wandb.ai/<entity>/<project>/reports/..."
+uv run python scripts/export_wandb_snapshot.py "https://wandb.ai/<entity>/<project>/reports/..."
 ```
 
 If credentials are missing, the exporter falls back to sample data so you can still build and test the marimo viewer.
@@ -82,6 +86,8 @@ If credentials are missing, the exporter falls back to sample data so you can st
 The first live export can take a while. For larger reports, it is normal for this step to take several minutes while W&B history, tables, artifacts, and media are being fetched.
 
 Recent versions of the exporter print per-phase progress, so you should now see which stage is active even during long downloads.
+
+If the same report has already been exported and the archived snapshot matches the current report metadata, the exporter reuses that snapshot automatically instead of downloading everything again. Pass `--refresh-snapshot-cache` if you want to force a fresh export.
 
 ### 2. Build and serve the marimo viewer
 
@@ -105,6 +111,8 @@ make marimo-build
 make marimo-serve
 ```
 
+If you prefer not to use environment variables, run the export step directly with the report URL instead of `make export`.
+
 ### Stop the local marimo server
 
 ```bash
@@ -114,6 +122,7 @@ make marimo-stop
 ## Output Layout
 
 - `extracted/processed/`: canonical exported snapshot
+- `extracted/snapshots/<report-slug>-<hash>/<timestamp>/processed/`: archived snapshots kept per exported report for repeat testing
 - `marimo_viewer/wandb_report.py`: generated marimo notebook
 - `marimo_viewer/dist/`: final marimo HTML-WASM site
 - `app/src/data/`: data bundle for the legacy Observable reference viewer
@@ -127,6 +136,7 @@ Exported content and local build artifacts are meant to stay out of version cont
 The repository's `.gitignore` is set up so that the following stay local by default:
 
 - `extracted/processed/` and `extracted/raw/`
+- `extracted/snapshots/`
 - `app/src/data/` and `app/src/media/`
 - `marimo_viewer/dist/`, `marimo_viewer/generated_assets/`, and generated marimo notebook payload files
 - `dist/`
@@ -197,9 +207,9 @@ In short: this project aims for graceful degradation. If a panel cannot yet be r
 
 ## Development Notes
 
-- `python3 scripts/generate_marimo_report.py` regenerates the marimo notebook from the current snapshot
-- `python3 scripts/export_marimo_wasm.py` regenerates the HTML-WASM marimo site
-- `python3 scripts/verify_export.py` validates that the exported snapshot has the files and offline rows needed by the marimo renderer
+- `uv run python scripts/generate_marimo_report.py` regenerates the marimo notebook from the current snapshot
+- `uv run python scripts/export_marimo_wasm.py` regenerates the HTML-WASM marimo site
+- `uv run python scripts/verify_export.py` validates that the exported snapshot has the files and offline rows needed by the marimo renderer
 - `npm run build` still builds the Observable reference viewer and syncs static assets into `dist/`
 
 ## Observable Reference Viewer

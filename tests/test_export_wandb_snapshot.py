@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts.export_wandb_snapshot import (
@@ -24,6 +25,11 @@ from scripts.export_wandb_snapshot import (
     extract_table_candidates_from_report,
     extract_table_key_from_panel_state,
     infer_base_url,
+    load_table_file_rows,
+    find_matching_snapshot_archive,
+    row_has_media_placeholders,
+    snapshot_cache_metadata,
+    snapshot_archive_dir,
 )
 
 
@@ -397,6 +403,33 @@ class ExportWandbSnapshotTests(unittest.TestCase):
                     exports = export_panel_tables(run_map, ["pred_table"])
         self.assertTrue(exports["pred_table"]["needs_hydration"])
 
+    def test_row_has_media_placeholders_detects_lowercase_image_column(self) -> None:
+        self.assertTrue(row_has_media_placeholders({"image": "Image", "score": 0.5}))
+        self.assertFalse(row_has_media_placeholders({"label": "Image", "score": 0.5}))
+
+    def test_export_panel_tables_uses_hydrated_rows_for_lowercase_image_placeholders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("scripts.export_wandb_snapshot.PROCESSED_DIR", Path(tmpdir)):
+                run_map = {"run-1": {"_run_object": object()}}
+                with patch(
+                    "scripts.export_wandb_snapshot._load_panel_table_rows_for_run",
+                    return_value=[{"__run_id": "run-1", "image": "Image", "score": 0.5}],
+                ), patch(
+                    "scripts.export_wandb_snapshot.hydrate_panel_table_rows",
+                    return_value=[
+                        {
+                            "__run_id": "run-1",
+                            "__run_name": "demo-run",
+                            "image": {"_kind": "image", "path": "media/images/demo.png"},
+                            "score": 0.5,
+                        }
+                    ],
+                ):
+                    exports = export_panel_tables(run_map, ["pred_table"])
+                    exported = json.loads((Path(tmpdir) / "panel_tables" / "pred-table.json").read_text(encoding="utf-8"))
+        self.assertFalse(exports["pred_table"]["needs_hydration"])
+        self.assertEqual(exported[0]["image"]["path"], "media/images/demo.png")
+
     def test_export_panel_tables_uses_hydrated_rows_without_marking_need(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("scripts.export_wandb_snapshot.PROCESSED_DIR", Path(tmpdir)):
@@ -418,6 +451,84 @@ class ExportWandbSnapshotTests(unittest.TestCase):
                         ],
                     )
         self.assertFalse(exports["pred_table"]["needs_hydration"])
+
+    def test_load_table_file_rows_restores_artifact_image_cells(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            artifact_root = root / "artifact"
+            image_dir = artifact_root / "media" / "images"
+            image_dir.mkdir(parents=True, exist_ok=True)
+            image_path = image_dir / "demo.png"
+            image_path.write_bytes(b"png")
+            table_path = artifact_root / "demo.table.json"
+            table_path.write_text(
+                json.dumps(
+                    {
+                        "columns": ["image", "score"],
+                        "data": [
+                            [
+                                {
+                                    "_type": "image-file",
+                                    "path": "media/images/demo.png",
+                                    "width": 28,
+                                    "height": 28,
+                                },
+                                0.5,
+                            ]
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch("scripts.export_wandb_snapshot.PROCESSED_DIR", root / "processed"):
+                rows = load_table_file_rows(table_path, artifact_root=artifact_root)
+        self.assertEqual(rows[0]["image"]["_kind"], "image")
+        self.assertTrue(str(rows[0]["image"]["path"]).startswith("media/images/"))
+
+    def test_snapshot_archive_dir_uses_report_title_and_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_dir = Path(tmpdir)
+            (processed_dir / "report_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-04-23T06:20:06.341566+00:00",
+                        "snapshot_cache": {"snapshot_cache_version": "v2"},
+                        "report_url": "https://wandb.ai/demo/project/reports/Sample-Report--Vmlldzox",
+                        "report": {"title": "Sample Report"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            archive_dir = snapshot_archive_dir(processed_dir)
+        self.assertIn("sample-report", str(archive_dir))
+        self.assertTrue(str(archive_dir).endswith("2026-04-23-062006-341566+0000"))
+
+    def test_find_matching_snapshot_archive_uses_snapshot_cache_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            snapshots_dir = Path(tmpdir)
+            archive_dir = snapshots_dir / "sample-report-deadbeef" / "2026-04-23-062006-341566+0000"
+            processed_dir = archive_dir / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            report = SimpleNamespace(
+                id="report-1",
+                display_name="Sample Report",
+                updated_at="2026-04-23T06:00:00+00:00",
+                spec={"blocks": [{"type": "html", "html": "<p>demo</p>"}]},
+            )
+            config = SimpleNamespace(
+                report_url="https://wandb.ai/demo/project/reports/sample",
+                entity="demo",
+                project="project",
+                sample_data=False,
+            )
+            cache_meta = snapshot_cache_metadata(config, report)
+            (processed_dir / "report_manifest.json").write_text(
+                json.dumps({"snapshot_cache": cache_meta}),
+                encoding="utf-8",
+            )
+            with patch("scripts.export_wandb_snapshot.FINAL_SNAPSHOTS_DIR", snapshots_dir):
+                matched = find_matching_snapshot_archive(cache_meta)
+        self.assertEqual(matched, archive_dir)
 
 
 if __name__ == "__main__":

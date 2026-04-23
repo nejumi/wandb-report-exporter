@@ -1,10 +1,11 @@
 [project]
 name = "wandb-report-exporter"
 version = "0.1.0"
-description = "Build-time W&B snapshot exporter for a static Observable viewer."
+description = "Build-time W&B report snapshot exporter for a static marimo viewer."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "marimo",
   "pandas>=2.2.0",
   "pyarrow>=18.0.0",
   "pillow>=10.4.0",
@@ -15,9 +16,6 @@ dependencies = [
 [project.optional-dependencies]
 reports = [
   "wandb-workspaces>=0.1.13",
-]
-marimo = [
-  "marimo",
 ]
 
 [tool.uv]

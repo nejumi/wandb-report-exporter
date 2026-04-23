@@ -190,7 +190,7 @@ def main() -> None:
     python_bin = python_with_marimo()
     if python_bin is None:
         raise RuntimeError(
-            "marimo is not installed. Install it with `uv sync --extra marimo` "
+            "marimo is not installed. Install project dependencies with `uv sync` "
             "or `pip install marimo`, then rerun this command."
         )
 

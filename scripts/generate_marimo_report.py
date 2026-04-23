@@ -29,6 +29,17 @@ def load_json(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def row_has_media_placeholders(row: dict[str, object]) -> bool:
+    for key, value in row.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        normalized_key = re.sub(r"[^a-z0-9]+", "", key.lower())
+        normalized_value = re.sub(r"[^a-z0-9]+", "", value.lower())
+        if normalized_key in {"image", "images", "media", "file", "files"} and normalized_value == normalized_key:
+            return True
+    return False
+
+
 def hydrate_media_items(node: object) -> object:
     if isinstance(node, dict):
         media_items = node.get("media_items")
@@ -1315,7 +1326,7 @@ def load_payload() -> dict[str, object]:
                 isinstance(rows, list)
                 and rows
                 and isinstance(rows[0], dict)
-                and rows[0].get("Image") == "Image"
+                and row_has_media_placeholders(rows[0])
                 and table_prediction_rows
             ):
                 panel_tables[table_key] = table_prediction_rows
@@ -1360,6 +1371,7 @@ def notebook_source(encoded_payload: str) -> str:
         @app.cell
         def __(PAYLOAD_B64):
             import base64
+            import hashlib
             import html
             import json
             import math
@@ -1949,15 +1961,31 @@ def notebook_source(encoded_payload: str) -> str:
             def contains_image_cells(rows):
                 return any(is_image_cell(value) for row in rows for value in row.values())
 
-            def render_image_cell(value):
+            def render_image_cell(value, cell_key=""):
                 if not is_image_cell(value):
                     return ""
                 mask_names = ", ".join(str(name).replace("_", " ") for name in (value.get("masks") or {{}}).keys())
                 caption = html.escape(mask_names or "image")
                 src = html.escape(str(value.get("path") or ""))
+                digest = hashlib.sha1(f"{{cell_key}}::{{src}}".encode("utf-8")).hexdigest()[:12]
+                lightbox_id = f"lightbox-{{digest}}"
                 return (
                     "<div class='marimo-image-thumb'>"
+                    + f"<input class='marimo-lightbox__toggle' type='checkbox' id='{{lightbox_id}}' />"
+                    + f"<label class='marimo-image-thumb__link' for='{{lightbox_id}}' aria-label='Open image preview'>"
                     + f"<img src='{{src}}' alt='image' />"
+                    + "<span class='marimo-image-thumb__zoom' aria-hidden='true'>Zoom</span>"
+                    + "</label>"
+                    + "<div class='marimo-lightbox' role='dialog' aria-modal='true'>"
+                    + f"<label class='marimo-lightbox__backdrop' for='{{lightbox_id}}' aria-label='Close image preview'></label>"
+                    + "<div class='marimo-lightbox__dialog'>"
+                    + "<div class='marimo-lightbox__chrome'>"
+                    + f"<div class='marimo-lightbox__caption'>{{caption}}</div>"
+                    + f"<label class='marimo-lightbox__close' for='{{lightbox_id}}'>Close</label>"
+                    + "</div>"
+                    + f"<img class='marimo-lightbox__image' src='{{src}}' alt='image' />"
+                    + "</div>"
+                    + "</div>"
                     + f"<div class='marimo-image-thumb__meta'>{{caption}}</div>"
                     + "</div>"
                 )
@@ -1971,12 +1999,14 @@ def notebook_source(encoded_payload: str) -> str:
                 if contains_image_cells(materialized_rows):
                     headers = list(materialized_rows[0].keys())
                     body = []
-                    for row in materialized_rows[:50]:
+                    for row_index, row in enumerate(materialized_rows[:50]):
                         cells = []
                         for header in headers:
                             value = row.get(header)
                             if is_image_cell(value):
-                                cells.append(f"<td>{{render_image_cell(value)}}</td>")
+                                row_key = row.get("__run_id") or row.get("run_id") or row.get("id") or row_index
+                                cell_key = f"{{row_key}}:{{header}}:{{row_index}}"
+                                cells.append(f"<td>{{render_image_cell(value, cell_key)}}</td>")
                             else:
                                 cells.append(f"<td>{{html.escape('' if value is None else str(value))}}</td>")
                         body.append("<tr>" + "".join(cells) + "</tr>")
@@ -2824,6 +2854,16 @@ def notebook_source(encoded_payload: str) -> str:
                     display: grid;
                     gap: 0.35rem;
                   }}
+                  .marimo-image-thumb__link {{
+                    display: block;
+                    cursor: zoom-in;
+                    position: relative;
+                  }}
+                  .marimo-lightbox__toggle {{
+                    position: absolute;
+                    opacity: 0;
+                    pointer-events: none;
+                  }}
                   .marimo-image-thumb img {{
                     width: 100%;
                     height: 120px;
@@ -2832,9 +2872,76 @@ def notebook_source(encoded_payload: str) -> str:
                     border: 1px solid rgba(0,0,0,0.1);
                     background: rgba(245,248,242,0.9);
                   }}
+                  .marimo-image-thumb__zoom {{
+                    position: absolute;
+                    right: 0.55rem;
+                    bottom: 0.55rem;
+                    padding: 0.18rem 0.45rem;
+                    border-radius: 999px;
+                    background: rgba(26, 32, 29, 0.76);
+                    color: #f7fbf4;
+                    font-size: 0.7rem;
+                    font-weight: 700;
+                    letter-spacing: 0.03em;
+                    text-transform: uppercase;
+                  }}
                   .marimo-image-thumb__meta {{
                     font-size: 0.78rem;
                     color: #606060;
+                  }}
+                  .marimo-lightbox {{
+                    position: fixed;
+                    inset: 0;
+                    display: none;
+                    z-index: 9999;
+                  }}
+                  .marimo-lightbox__toggle:checked + .marimo-image-thumb__link + .marimo-lightbox {{
+                    display: block;
+                  }}
+                  .marimo-lightbox__backdrop {{
+                    position: absolute;
+                    inset: 0;
+                    background: rgba(18, 22, 20, 0.82);
+                    backdrop-filter: blur(4px);
+                  }}
+                  .marimo-lightbox__dialog {{
+                    position: relative;
+                    z-index: 1;
+                    display: grid;
+                    gap: 0.75rem;
+                    width: min(92vw, 880px);
+                    max-height: 90vh;
+                    margin: 5vh auto;
+                    padding: 1rem;
+                    border-radius: 18px;
+                    background: #fbfcf8;
+                    box-shadow: 0 24px 64px rgba(0,0,0,0.28);
+                  }}
+                  .marimo-lightbox__chrome {{
+                    display: flex;
+                    gap: 1rem;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                  }}
+                  .marimo-lightbox__caption {{
+                    font-size: 0.92rem;
+                    color: #2d3a31;
+                  }}
+                  .marimo-lightbox__close {{
+                    color: #2d3a31;
+                    cursor: pointer;
+                    font-size: 0.84rem;
+                    font-weight: 700;
+                    letter-spacing: 0.02em;
+                    text-transform: uppercase;
+                  }}
+                  .marimo-lightbox__image {{
+                    width: 100%;
+                    max-height: calc(90vh - 5rem);
+                    object-fit: contain;
+                    border-radius: 14px;
+                    background: rgba(240, 244, 236, 0.92);
                   }}
                   .marimo-spacer {{
                     min-height: 1px;
